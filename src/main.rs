@@ -3,7 +3,7 @@ use std::io::{self, BufRead, BufReader};
 use std::collections::VecDeque;
 use std::error::Error;
 
-fn vcf_reader(file_path: &str) -> Result<VecDeque<VariantReader>, Box<dyn Error>> {
+fn vcf_reader(file_path: &str) -> Result<VecDeque<Variant>, Box<dyn Error>> {
     let file = File::open(file_path)?;
     let reader = BufReader::new(file);
 
@@ -23,7 +23,7 @@ fn vcf_reader(file_path: &str) -> Result<VecDeque<VariantReader>, Box<dyn Error>
             let refr = fields[3].to_string();
             let alt = fields[4].to_string();
             
-            variants.push_back(VariantReader {
+            variants.push_back(Variant {
                 chrom: chrom,
                 pos: pos?,
                 refr: refr,
@@ -60,7 +60,7 @@ impl BaseCounts {
 }
 
 #[derive(Debug, Clone)]
-struct VariantReader {
+struct Variant {
 	chrom: String,
 	pos: u64,
 	refr: String,
@@ -68,11 +68,24 @@ struct VariantReader {
 	counts: BaseCounts,
 }
 
+fn get_vcf_min_max(variants: &VecDeque<Variant>) -> Option<(String, u64, u64)> {
+    let first = variants.front()?;
+    let chrom = first.chrom.clone();
+    let min_pos = first.pos;
+    let max_pos = variants.back()?.pos;
+
+    Some((chrom, min_pos, max_pos))
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file_path = "test_data/small_test.vcf";
     
     let variants = vcf_reader(file_path)?;
 
+    let (region_chrom, min_pos, max_pos) = 
+        get_vcf_min_max(&variants).ok_or("Could not determine VCF min/max")?;
+
+    println!("Region Chromosome: {}, Min Pos: {}, Max Pos: {}", region_chrom, min_pos, max_pos);
     println!("{:?}", variants);
 
     Ok(())
