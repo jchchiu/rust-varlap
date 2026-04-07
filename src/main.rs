@@ -19,17 +19,26 @@ fn vcf_reader(file_path: &str) -> Result<VecDeque<Variant>, Box<dyn Error>> {
         
         if fields.len() >= 5 {
             let chrom = fields[0].to_string();
-            let pos = fields[1].parse::<u64>();
+
+            let pos = match fields[1].parse::<u64>() {
+                Ok(p) => p,
+                Err(_) => {
+                    eprintln!("Warning: invalid POS, skipping row: {}", line);
+                    continue;
+                }
+            };
+
             let refr = fields[3].to_string();
-            let alt = fields[4].to_string();
-            
-            variants.push_back(Variant {
-                chrom: chrom,
-                pos: pos?,
-                refr: refr,
-                alt: alt,
-                counts: BaseCounts::default(),
-            });
+
+            for alt in fields[4].split(',') {
+                variants.push_back(Variant {
+                    chrom: chrom.clone(),
+                    pos,
+                    refr: refr.clone(),
+                    alt: alt.to_string(),
+                    counts: BaseCounts::default(),
+                });
+            }
         } else {
             eprintln!("Warning: Skipping input row: {}", line);
         }
@@ -78,7 +87,7 @@ fn get_vcf_min_max(variants: &VecDeque<Variant>) -> Option<(String, u64, u64)> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let file_path = "test_data/small_test.vcf";
+    let file_path = "test_data/vars.vcf";
     
     let variants = vcf_reader(file_path)?;
 
