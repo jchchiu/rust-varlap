@@ -63,7 +63,8 @@ impl BaseCounts {
             'C' => self.c += 1,
             'G' => self.g += 1,
             'T' => self.t += 1,
-            _ => self.n += 1,
+            'N' => self.n += 1,
+            _ => eprintln!("Warning: Base does not match: {}", base),
         }
     }
 }
