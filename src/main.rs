@@ -31,11 +31,15 @@ fn vcf_reader(file_path: &str) -> Result<VecDeque<Variant>, Box<dyn Error>> {
             let refr = fields[3].to_string();
 
             for alt in fields[4].split(',') {
+                
+                let vartype = get_var_type(&refr, &alt);
+
                 variants.push_back(Variant {
                     chrom: chrom.clone(),
                     pos,
                     refr: refr.clone(),
                     alt: alt.to_string(),
+                    vartype,
                     counts: BaseCounts::default(),
                 });
             }
@@ -75,6 +79,7 @@ struct Variant {
 	pos: u64,
 	refr: String,
 	alt: String,
+    vartype: VarType,
 	counts: BaseCounts,
 }
 
@@ -85,6 +90,41 @@ fn get_vcf_min_max(variants: &VecDeque<Variant>) -> Option<(String, u64, u64)> {
     let max_pos = variants.back()?.pos;
 
     Some((chrom, min_pos, max_pos))
+}
+
+#[derive(Debug, Clone, Copy)]
+enum VarType {
+    Snv,
+    Del,
+    Ins,
+    Unknown,
+}
+
+impl VarType {
+    fn as_str(&self) -> &'static str {
+        match self {
+            VarType::Snv => "SNV",
+            VarType::Del => "DEL",
+            VarType::Ins => "INS",
+            VarType::Unknown => "UNKNOWN",            
+        }
+    }
+}
+
+fn get_var_type(refr: &str, alt: & str) -> VarType {
+    if refr.len() == 1 && alt.len() == 1 {
+        VarType::Snv
+    } else if refr.len() > alt.len() {
+        VarType::Del
+    } else if refr.len() < alt.len() {
+        VarType::Ins
+    } else {
+        eprintln!(
+            "Warning: Cannot determine the type of variant with ref: {} and alt: {}",
+            refr, alt
+        );
+        VarType::Unknown
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
