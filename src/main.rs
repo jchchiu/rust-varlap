@@ -1,8 +1,28 @@
 use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::io::{BufRead, BufReader};
 use std::collections::VecDeque;
 use std::error::Error;
 use csv::Writer;
+use rust_htslib::bam::{Read, IndexedReader};
+
+fn get_bam_in_region(
+    file_path: &str,
+    region_chrom: &str, 
+    min_pos: u64, 
+    max_pos: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut bam = IndexedReader::from_path(file_path)?;
+
+    bam.fetch((region_chrom, min_pos, max_pos))?;
+
+    for result in bam.records() {
+        let record = result?;
+        println!("Read Name: {}", std::str::from_utf8(record.qname())?);
+        println!("Position: {}", record.pos() + 1);
+    }
+
+    Ok(())    
+}
 
 fn write_variant_row(
     writer: &mut Writer<File>,
@@ -199,15 +219,16 @@ fn get_var_type(refr: &str, alt: & str) -> VarType {
 }
 
 fn print_header_row() -> Result<(), Box<dyn Error>> {
-    println!("chrom\tpos\ta\tc\tg\tt\tn\tdepth\trefr_count\talt_count\talt_vaf");
+    println!("chrom\tpos\tvartype\ta\tc\tg\tt\tn\tdepth\trefr_count\talt_count\talt_vaf");
     Ok(())
 }
 
 fn print_variant_row(var: &Variant, base_stats: &BaseCountsStats) -> Result<(), Box<dyn Error>> {
     println!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         var.chrom,
         var.pos,
+        var.vartype.as_str(),
         var.counts.a,
         var.counts.c,
         var.counts.g,
@@ -222,14 +243,9 @@ fn print_variant_row(var: &Variant, base_stats: &BaseCountsStats) -> Result<(), 
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let file_path = "test_data/vars.vcf";
+    let vcf_path = "test_data/vars.vcf";
     
-    let variants = vcf_reader(file_path)?;
-
-    let (region_chrom, min_pos, max_pos) = 
-        get_vcf_min_max(&variants).ok_or("Could not determine VCF min/max")?;
-
-    println!("Region Chromosome: {}, Min Pos: {}, Max Pos: {}", region_chrom, min_pos, max_pos);
+    let variants = vcf_reader(vcf_path)?;
     
     println!("All Variants in the Variants VecDeque:");
     for variant in &variants {
@@ -243,5 +259,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let base_counts_stats = variant.base_counts_stats().ok_or("error")?;
         print_variant_row(&variant, &base_counts_stats)?;
     }
+
+    let (region_chrom, min_pos, max_pos) = 
+        get_vcf_min_max(&variants).ok_or("Could not determine VCF min/max")?;
+
+    println!("Region Chromosome: {}, Min Pos: {}, Max Pos: {}", region_chrom, min_pos, max_pos);
+
+    let bam_path = "test_data/reads.sorted.bam";
+
+    get_bam_in_region(&bam_path, &region_chrom, min_pos, max_pos)?;
+
     Ok(())
 }
