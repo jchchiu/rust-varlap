@@ -2,6 +2,28 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::collections::VecDeque;
 use std::error::Error;
+use csv::Writer;
+
+fn write_variant_row(
+    writer: &mut Writer<File>,
+    var: &Variant,
+    base_stats: &BaseCountsStats,
+) -> Result<(), Box<dyn Error>> {
+    writer.write_record(&[
+        &var.chrom,
+        &var.pos.to_string(),
+        &var.counts.a.to_string(),
+        &var.counts.c.to_string(),
+        &var.counts.g.to_string(),
+        &var.counts.t.to_string(),
+        &var.counts.n.to_string(),
+        &base_stats.depth.to_string(),
+        &base_stats.refr_count.to_string(),
+        &base_stats.alt_count.to_string(),
+        &base_stats.alt_vaf.to_string(),
+    ])?;
+    Ok(())
+}
 
 fn vcf_reader(file_path: &str) -> Result<VecDeque<Variant>, Box<dyn Error>> {
     let file = File::open(file_path)?;
@@ -176,6 +198,29 @@ fn get_var_type(refr: &str, alt: & str) -> VarType {
     }
 }
 
+fn print_header_row() -> Result<(), Box<dyn Error>> {
+    println!("chrom\tpos\ta\tc\tg\tt\tn\tdepth\trefr_count\talt_count\talt_vaf");
+    Ok(())
+}
+
+fn print_variant_row(var: &Variant, base_stats: &BaseCountsStats) -> Result<(), Box<dyn Error>> {
+    println!(
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        var.chrom,
+        var.pos,
+        var.counts.a,
+        var.counts.c,
+        var.counts.g,
+        var.counts.t,
+        var.counts.n,
+        base_stats.depth,
+        base_stats.refr_count,
+        base_stats.alt_count,
+        base_stats.alt_vaf,
+    );
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file_path = "test_data/vars.vcf";
     
@@ -193,5 +238,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{:?}", base_counts_stats);
     }
 
+    print_header_row()?;
+    for variant in &variants {
+        let base_counts_stats = variant.base_counts_stats().ok_or("error")?;
+        print_variant_row(&variant, &base_counts_stats)?;
+    }
     Ok(())
 }
