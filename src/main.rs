@@ -31,7 +31,6 @@ fn vcf_reader(file_path: &str) -> Result<VecDeque<Variant>, Box<dyn Error>> {
             let refr = fields[3].to_string();
 
             for alt in fields[4].split(',') {
-                
                 let vartype = get_var_type(&refr, &alt);
 
                 variants.push_back(Variant {
@@ -86,6 +85,7 @@ struct Variant {
 fn get_vcf_min_max(variants: &VecDeque<Variant>) -> Option<(String, u64, u64)> {
     let first = variants.front()?;
     let chrom = first.chrom.clone();
+    
     let min_pos = first.pos;
     let max_pos = variants.back()?.pos;
 
