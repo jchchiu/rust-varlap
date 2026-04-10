@@ -107,6 +107,8 @@ fn process_bam_region(
             if zero_based_pos >= read_start && zero_based_pos < read_end {
                 let base = seq[(zero_based_pos - read_start) as usize] as char;
                 var.counts.increment(base);
+            } else {
+                break;
             }
         }
     }
