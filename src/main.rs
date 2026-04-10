@@ -121,6 +121,14 @@ fn process_bam_region(
     Ok(())    
 }
 
+fn varclass_matches(varclass: &str, vartype: &VarType) -> bool {
+    match varclass.to_ascii_uppercase().as_str() {
+        "SNV" => matches!(vartype, VarType::Snv | VarType::Unknown),
+        "INDEL" => matches!(vartype, VarType::Ins | VarType::Del | VarType::Unknown),
+        _ => false,
+    }
+}
+
 fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<dyn Error>> {
     let file = File::open(file_path)?;
     let reader = BufReader::new(file);
@@ -150,6 +158,10 @@ fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<
 
             for alt in fields[4].split(',') {
                 let vartype = get_var_type(&refr, alt);
+
+                if !varclass_matches(varclass, &vartype) {
+                    continue;
+                }
 
                 variants.push_back(Variant {
                     chrom: chrom.clone(),
@@ -297,8 +309,9 @@ fn get_var_type(refr: &str, alt: & str) -> VarType {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let vcf_path = "test_data/vars.vcf";
     let bam_path = "test_data/reads.sorted.bam";
+    let varclass = String::from("SNV");
     
-    let mut variants = vcf_reader(&vcf_path)?;
+    let mut variants = vcf_reader(&vcf_path, &varclass)?;
 
     let (region_chrom, min_pos, max_pos) = 
         get_vcf_min_max(&variants).ok_or("Could not determine VCF min/max")?;
