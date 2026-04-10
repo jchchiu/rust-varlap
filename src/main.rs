@@ -26,6 +26,32 @@ fn write_variant_row(
     Ok(())
 }
 
+fn print_header_row() -> Result<(), Box<dyn Error>> {
+    println!("chrom\tpos\tref\talt\tvartype\tdepth\tA\tT\tG\tC\tN\trefr_count\talt_count\talt_vaf");
+    Ok(())
+}
+
+fn print_variant_row(var: &Variant, base_stats: &BaseCountsStats) -> Result<(), Box<dyn Error>> {
+    println!(
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        var.chrom,
+        var.pos,
+        var.refr,
+        var.alt,
+        var.vartype.as_str(),
+        base_stats.depth,
+        var.counts.a,
+        var.counts.t,
+        var.counts.g,
+        var.counts.c,
+        var.counts.n,
+        base_stats.refr_count,
+        base_stats.alt_count,
+        base_stats.alt_vaf,
+    );
+    Ok(())
+}
+
 fn process_bam_region(
     variants: &mut VecDeque<Variant>,
     bam_path: &str,
@@ -38,6 +64,10 @@ fn process_bam_region(
 
     bam_reader.fetch((region_chrom, min_pos - 1, max_pos))?;
 
+    print_header_row()?;
+
+    println!("Variant queue length before loop: {}", variants.len());
+
     for read_result in bam_reader.rc_records() {
         let record = read_result?;
 
@@ -46,27 +76,52 @@ fn process_bam_region(
 
         let read_start = record.pos() as u64;
 
+        loop {
+            let should_pop = match variants.front() {
+                Some(var) => (read_start + 1) > var.pos,
+                None => false,
+            };
+
+            if should_pop {
+                if let Some(var) = variants.pop_front() {
+                    let base_counts_stats = var.base_counts_stats().ok_or("error")?;
+                    print_variant_row(&var, &base_counts_stats)?;
+                }
+
+            println!("Variant queue length after loop activates: {}", variants.len());
+            } else {
+                break;
+            }
+        }
+
         let seq = record.seq();
 
-        for variant in &mut *variants {
+        for var in &mut *variants {
             //if variant.chrom != read_chrom {
             //    break;
             //}
             
-            let zero_based_pos = variant.pos - 1;
+            let zero_based_pos = var.pos - 1;
             let read_end = read_start + record.seq_len() as u64;
 
             if zero_based_pos >= read_start && zero_based_pos < read_end {
                 let base = seq[(zero_based_pos - read_start) as usize] as char;
-                variant.counts.increment(base);
+                var.counts.increment(base);
             }
         }
     }
 
+    while let Some(var) = variants.pop_front() {
+        let base_counts_stats = var.base_counts_stats().ok_or("error")?;
+        print_variant_row(&var, &base_counts_stats)?;
+    }
+
+    println!("Variant queue length at end: {}", variants.len());
+
     Ok(())    
 }
 
-fn vcf_reader(file_path: &str) -> Result<VecDeque<Variant>, Box<dyn Error>> {
+fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<dyn Error>> {
     let file = File::open(file_path)?;
     let reader = BufReader::new(file);
 
@@ -94,7 +149,7 @@ fn vcf_reader(file_path: &str) -> Result<VecDeque<Variant>, Box<dyn Error>> {
             let refr = fields[3].to_string();
 
             for alt in fields[4].split(',') {
-                let vartype = get_var_type(&refr, &alt);
+                let vartype = get_var_type(&refr, alt);
 
                 variants.push_back(Variant {
                     chrom: chrom.clone(),
@@ -239,57 +294,18 @@ fn get_var_type(refr: &str, alt: & str) -> VarType {
     }
 }
 
-fn print_header_row() -> Result<(), Box<dyn Error>> {
-    println!("chrom\tpos\tref\talt\tvartype\tdepth\ta\tt\tg\tc\tn\trefr_count\talt_count\talt_vaf");
-    Ok(())
-}
-
-fn print_variant_row(var: &Variant, base_stats: &BaseCountsStats) -> Result<(), Box<dyn Error>> {
-    println!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-        var.chrom,
-        var.pos,
-        var.refr,
-        var.alt,
-        var.vartype.as_str(),
-        base_stats.depth,
-        var.counts.a,
-        var.counts.t,
-        var.counts.g,
-        var.counts.c,
-        var.counts.n,
-        base_stats.refr_count,
-        base_stats.alt_count,
-        base_stats.alt_vaf,
-    );
-    Ok(())
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let vcf_path = "test_data/vars.vcf";
     let bam_path = "test_data/reads.sorted.bam";
     
     let mut variants = vcf_reader(&vcf_path)?;
-    
-    println!("All Variants in the Variants VecDeque:");
-    for variant in &variants {
-        println!("{:?}", variant);
-        let base_counts_stats = variant.base_counts_stats();
-        println!("{:?}", base_counts_stats);
-    }
 
     let (region_chrom, min_pos, max_pos) = 
-    get_vcf_min_max(&variants).ok_or("Could not determine VCF min/max")?;
+        get_vcf_min_max(&variants).ok_or("Could not determine VCF min/max")?;
+
+    println!("Region Chromosome: {}, Min Pos: {}, Max Pos: {}", &region_chrom, min_pos, max_pos);
 
     process_bam_region(&mut variants, &bam_path, &region_chrom, min_pos, max_pos)?;
-
-    print_header_row()?;
-    for variant in &variants {
-        let base_counts_stats = variant.base_counts_stats().ok_or("error")?;
-        print_variant_row(&variant, &base_counts_stats)?;
-    }
-
-    println!("Region Chromosome: {}, Min Pos: {}, Max Pos: {}", region_chrom, min_pos, max_pos);
 
     Ok(())
 }
