@@ -5,25 +5,6 @@ use std::error::Error;
 use csv::Writer;
 use rust_htslib::bam::{Read, IndexedReader};
 
-fn get_bam_in_region(
-    file_path: &str,
-    region_chrom: &str, 
-    min_pos: u64, 
-    max_pos: u64,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut bam = IndexedReader::from_path(file_path)?;
-
-    bam.fetch((region_chrom, min_pos, max_pos))?;
-
-    for result in bam.records() {
-        let record = result?;
-        println!("Read Name: {}", std::str::from_utf8(record.qname())?);
-        println!("Position: {}", record.pos() + 1);
-    }
-
-    Ok(())    
-}
-
 fn write_variant_row(
     writer: &mut Writer<File>,
     var: &Variant,
@@ -43,6 +24,46 @@ fn write_variant_row(
         &base_stats.alt_vaf.to_string(),
     ])?;
     Ok(())
+}
+
+fn process_bam_region(
+    variants: &mut VecDeque<Variant>,
+    bam_path: &str,
+    region_chrom: &str, 
+    min_pos: u64, 
+    max_pos: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut bam_reader = IndexedReader::from_path(bam_path)?;
+    //let header = bam_reader.header().to_owned();
+
+    bam_reader.fetch((region_chrom, min_pos - 1, max_pos))?;
+
+    for read_result in bam_reader.rc_records() {
+        let record = read_result?;
+
+        //let tid = record.tid();
+        //let read_chrom = String::from_utf8(header.tid2name(tid as u32).to_vec())?;
+
+        let read_start = record.pos() as u64;
+
+        let seq = record.seq();
+
+        for variant in &mut *variants {
+            //if variant.chrom != read_chrom {
+            //    break;
+            //}
+            
+            let zero_based_pos = variant.pos - 1;
+            let read_end = read_start + record.seq_len() as u64;
+
+            if zero_based_pos >= read_start && zero_based_pos < read_end {
+                let base = seq[(zero_based_pos - read_start) as usize] as char;
+                variant.counts.increment(base);
+            }
+        }
+    }
+
+    Ok(())    
 }
 
 fn vcf_reader(file_path: &str) -> Result<VecDeque<Variant>, Box<dyn Error>> {
@@ -219,22 +240,24 @@ fn get_var_type(refr: &str, alt: & str) -> VarType {
 }
 
 fn print_header_row() -> Result<(), Box<dyn Error>> {
-    println!("chrom\tpos\tvartype\ta\tc\tg\tt\tn\tdepth\trefr_count\talt_count\talt_vaf");
+    println!("chrom\tpos\tref\talt\tvartype\tdepth\ta\tt\tg\tc\tn\trefr_count\talt_count\talt_vaf");
     Ok(())
 }
 
 fn print_variant_row(var: &Variant, base_stats: &BaseCountsStats) -> Result<(), Box<dyn Error>> {
     println!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         var.chrom,
         var.pos,
+        var.refr,
+        var.alt,
         var.vartype.as_str(),
-        var.counts.a,
-        var.counts.c,
-        var.counts.g,
-        var.counts.t,
-        var.counts.n,
         base_stats.depth,
+        var.counts.a,
+        var.counts.t,
+        var.counts.g,
+        var.counts.c,
+        var.counts.n,
         base_stats.refr_count,
         base_stats.alt_count,
         base_stats.alt_vaf,
@@ -244,8 +267,9 @@ fn print_variant_row(var: &Variant, base_stats: &BaseCountsStats) -> Result<(), 
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let vcf_path = "test_data/vars.vcf";
+    let bam_path = "test_data/reads.sorted.bam";
     
-    let variants = vcf_reader(vcf_path)?;
+    let mut variants = vcf_reader(&vcf_path)?;
     
     println!("All Variants in the Variants VecDeque:");
     for variant in &variants {
@@ -254,20 +278,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{:?}", base_counts_stats);
     }
 
+    let (region_chrom, min_pos, max_pos) = 
+    get_vcf_min_max(&variants).ok_or("Could not determine VCF min/max")?;
+
+    process_bam_region(&mut variants, &bam_path, &region_chrom, min_pos, max_pos)?;
+
     print_header_row()?;
     for variant in &variants {
         let base_counts_stats = variant.base_counts_stats().ok_or("error")?;
         print_variant_row(&variant, &base_counts_stats)?;
     }
 
-    let (region_chrom, min_pos, max_pos) = 
-        get_vcf_min_max(&variants).ok_or("Could not determine VCF min/max")?;
-
     println!("Region Chromosome: {}, Min Pos: {}, Max Pos: {}", region_chrom, min_pos, max_pos);
-
-    let bam_path = "test_data/reads.sorted.bam";
-
-    get_bam_in_region(&bam_path, &region_chrom, min_pos, max_pos)?;
 
     Ok(())
 }
