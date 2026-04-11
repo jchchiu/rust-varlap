@@ -27,18 +27,19 @@ fn write_variant_row(
 }
 
 fn print_header_row() -> Result<(), Box<dyn Error>> {
-    println!("chrom\tpos\tref\talt\tvartype\tdepth\tA\tT\tG\tC\tN\trefr_count\talt_count\talt_vaf");
+    println!("chrom\tpos\tref\talt\tvartype\tpos normalised\tdepth\tA\tT\tG\tC\tN\trefr_count\talt_count\talt_vaf");
     Ok(())
 }
 
-fn print_variant_row(var: &Variant, base_stats: &BaseCountsStats) -> Result<(), Box<dyn Error>> {
+fn print_variant_row(var: &Variant, base_stats: &BaseCountsStats, pos_fraction: f64) -> Result<(), Box<dyn Error>> {
     println!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         var.chrom,
         var.pos,
         var.refr,
         var.alt,
         var.vartype.as_str(),
+        pos_fraction,
         base_stats.depth,
         var.counts.a,
         var.counts.t,
@@ -50,6 +51,21 @@ fn print_variant_row(var: &Variant, base_stats: &BaseCountsStats) -> Result<(), 
         base_stats.alt_vaf,
     );
     Ok(())
+}
+
+fn get_ref_len(
+    bam_reader: &IndexedReader,
+    chrom: &str,
+) -> Result<Option<u64>, Box<dyn std::error::Error>> {
+    let header = bam_reader.header();
+
+    for tid in 0..header.target_count() {
+        let name = std::str::from_utf8(header.tid2name(tid))?;
+        if name == chrom {
+            return Ok(header.target_len(tid));
+        }
+    }
+    Ok(None)
 }
 
 fn process_bam_region(
@@ -68,6 +84,9 @@ fn process_bam_region(
 
     println!("Variant queue length before loop: {}", variants.len());
 
+    let ref_seq_len = get_ref_len(&bam_reader, &region_chrom)?
+        .ok_or_else(|| "Error: Could not find reference sequence length")?;
+
     for read_result in bam_reader.rc_records() {
         let record = read_result?;
 
@@ -75,6 +94,7 @@ fn process_bam_region(
         //let read_chrom = String::from_utf8(header.tid2name(tid as u32).to_vec())?;
 
         let read_start = record.pos() as u64;
+        let seq = record.seq();
 
         loop {
             let should_pop = match variants.front() {
@@ -85,7 +105,8 @@ fn process_bam_region(
             if should_pop {
                 if let Some(var) = variants.pop_front() {
                     let base_counts_stats = var.base_counts_stats().ok_or("error")?;
-                    print_variant_row(&var, &base_counts_stats)?;
+                    let pos_fraction = var.get_pos_fraction(ref_seq_len);
+                    print_variant_row(&var, &base_counts_stats, pos_fraction)?;
                 }
 
             println!("Variant queue length after loop activates: {}", variants.len());
@@ -93,8 +114,6 @@ fn process_bam_region(
                 break;
             }
         }
-
-        let seq = record.seq();
 
         for var in &mut *variants {
             //if variant.chrom != read_chrom {
@@ -115,7 +134,8 @@ fn process_bam_region(
 
     while let Some(var) = variants.pop_front() {
         let base_counts_stats = var.base_counts_stats().ok_or("error")?;
-        print_variant_row(&var, &base_counts_stats)?;
+        let pos_fraction = var.get_pos_fraction(ref_seq_len);
+        print_variant_row(&var, &base_counts_stats, pos_fraction)?;
     }
 
     println!("Variant queue length at end: {}", variants.len());
@@ -260,6 +280,10 @@ impl Variant {
         let refr_char = self.refr.chars().next()?;
         let alt_char = self.alt.chars().next()?;
         Some(self.counts.stats(refr_char, alt_char))
+    }
+
+    fn get_pos_fraction(&self, ref_seq_len: u64) -> f64 {
+        self.pos as f64/ ref_seq_len as f64
     }
 }
 
