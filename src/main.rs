@@ -106,24 +106,16 @@ fn process_bam_region(
     csv_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut bam_reader = IndexedReader::from_path(bam_path)?;
-    //let header = bam_reader.header().to_owned();
-
     bam_reader.fetch((region_chrom, min_pos - 1, max_pos))?;
 
     let mut csv_writer = Writer::from_path(csv_path)?;
-
     write_header_row(&mut csv_writer)?;
-
     print_header_row()?;
 
     let ref_seq_len = get_ref_len(&bam_reader, &region_chrom)?;
 
     for read_result in bam_reader.rc_records() {
         let record = read_result?;
-
-        //let tid = record.tid();
-        //let read_chrom = String::from_utf8(header.tid2name(tid as u32).to_vec())?;
-
         let read_start = record.pos() as u64;
         let seq = record.seq();
 
@@ -146,10 +138,6 @@ fn process_bam_region(
         }
 
         for var in &mut *variants {
-            //if variant.chrom != read_chrom {
-            //    break;
-            //}
-            
             let zero_based_pos = var.pos - 1;
             let read_end = read_start + record.seq_len() as u64;
 
