@@ -5,20 +5,46 @@ use std::error::Error;
 use csv::Writer;
 use rust_htslib::bam::{Read, IndexedReader};
 
+fn write_header_row(writer: &mut Writer<File>) -> Result<(), Box<dyn Error>> {
+    writer.write_record(&[
+        "chrom",
+        "pos",
+        "ref",
+        "alt",
+        "vartype",
+        "pos_normalised",
+        "depth",
+        "A",
+        "T",
+        "G",
+        "C",
+        "N",
+        "ref_count",
+        "alt_count",
+        "alt_vaf",
+    ])?;
+    Ok(())
+}
+
 fn write_variant_row(
     writer: &mut Writer<File>,
     var: &Variant,
     base_stats: &BaseCountsStats,
+    pos_fraction: f64,
 ) -> Result<(), Box<dyn Error>> {
     writer.write_record(&[
         &var.chrom,
         &var.pos.to_string(),
-        &var.counts.a.to_string(),
-        &var.counts.c.to_string(),
-        &var.counts.g.to_string(),
-        &var.counts.t.to_string(),
-        &var.counts.n.to_string(),
+        &var.refr,
+        &var.alt,
+        &var.vartype.as_str().to_string(),
+        &pos_fraction.to_string(),
         &base_stats.depth.to_string(),
+        &var.counts.a.to_string(),
+        &var.counts.t.to_string(),
+        &var.counts.g.to_string(),
+        &var.counts.c.to_string(),
+        &var.counts.n.to_string(),
         &base_stats.refr_count.to_string(),
         &base_stats.alt_count.to_string(),
         &base_stats.alt_vaf.to_string(),
@@ -27,7 +53,7 @@ fn write_variant_row(
 }
 
 fn print_header_row() -> Result<(), Box<dyn Error>> {
-    println!("chrom\tpos\tref\talt\tvartype\tpos normalised\tdepth\tA\tT\tG\tC\tN\trefr_count\talt_count\talt_vaf");
+    println!("chrom\tpos\tref\talt\tvartype\tpos_normalised\tdepth\tA\tT\tG\tC\tN\tref_count\talt_count\talt_vaf");
     Ok(())
 }
 
@@ -77,15 +103,18 @@ fn process_bam_region(
     region_chrom: &str, 
     min_pos: u64, 
     max_pos: u64,
+    csv_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut bam_reader = IndexedReader::from_path(bam_path)?;
     //let header = bam_reader.header().to_owned();
 
     bam_reader.fetch((region_chrom, min_pos - 1, max_pos))?;
 
-    print_header_row()?;
+    let mut csv_writer = Writer::from_path(csv_path)?;
 
-    println!("Variant queue length before loop: {}", variants.len());
+    write_header_row(&mut csv_writer)?;
+
+    print_header_row()?;
 
     let ref_seq_len = get_ref_len(&bam_reader, &region_chrom)?;
 
@@ -109,9 +138,8 @@ fn process_bam_region(
                     let base_counts_stats = var.base_counts_stats().ok_or("error")?;
                     let pos_fraction = var.get_pos_fraction(ref_seq_len);
                     print_variant_row(&var, &base_counts_stats, pos_fraction)?;
+                    write_variant_row(&mut csv_writer, &var, &base_counts_stats, pos_fraction)?;
                 }
-
-            println!("Variant queue length after loop activates: {}", variants.len());
             } else {
                 break;
             }
@@ -138,9 +166,8 @@ fn process_bam_region(
         let base_counts_stats = var.base_counts_stats().ok_or("error")?;
         let pos_fraction = var.get_pos_fraction(ref_seq_len);
         print_variant_row(&var, &base_counts_stats, pos_fraction)?;
+        write_variant_row(&mut csv_writer, &var, &base_counts_stats, pos_fraction)?;
     }
-
-    println!("Variant queue length at end: {}", variants.len());
 
     Ok(())    
 }
@@ -335,9 +362,10 @@ fn get_var_type(refr: &str, alt: & str) -> VarType {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let vcf_path = "test_data/vars.vcf";
-    let bam_path = "test_data/reads.sorted.bam";
-    let varclass = String::from("SNV");
+    let vcf_path = "/home/jch/genomic-data/chrM_heavy_stress.vcf";
+    let bam_path = "/home/jch/genomic-data/chrM_heavy_stress.sorted.bam";
+    let varclass = "SNV";
+    let csv_path = "/home/jch/git/rust-varlap/test_data/rust-varlap.output.csv";
     
     let mut variants = vcf_reader(&vcf_path, &varclass)?;
 
@@ -346,7 +374,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Region Chromosome: {}, Min Pos: {}, Max Pos: {}", &region_chrom, min_pos, max_pos);
 
-    process_bam_region(&mut variants, &bam_path, &region_chrom, min_pos, max_pos)?;
+    process_bam_region(&mut variants, &bam_path, &region_chrom, min_pos, max_pos, &csv_path)?;
 
     Ok(())
 }
