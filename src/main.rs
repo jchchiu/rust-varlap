@@ -168,8 +168,9 @@ fn process_bam_region(
         print_variant_row(&var, &base_counts_stats, pos_fraction)?;
         write_variant_row(&mut csv_writer, &var, &base_counts_stats, pos_fraction)?;
     }
+    csv_writer.flush()?;
 
-    Ok(())    
+    Ok(()) 
 }
 
 fn varclass_matches(varclass: &str, vartype: &VarType) -> bool {
