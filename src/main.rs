@@ -56,16 +56,19 @@ fn print_variant_row(var: &Variant, base_stats: &BaseCountsStats, pos_fraction: 
 fn get_ref_len(
     bam_reader: &IndexedReader,
     chrom: &str,
-) -> Result<Option<u64>, Box<dyn std::error::Error>> {
+) -> Result<u64, Box<dyn std::error::Error>> {
     let header = bam_reader.header();
 
     for tid in 0..header.target_count() {
         let name = std::str::from_utf8(header.tid2name(tid))?;
         if name == chrom {
-            return Ok(header.target_len(tid));
+            return header
+                .target_len(tid)
+                .ok_or_else(|| format!("Reference '{}' found, but has no length", chrom).into());
         }
     }
-    Ok(None)
+
+    Err(format!("Could not find reference '{}' in BAM header", chrom).into())
 }
 
 fn process_bam_region(
@@ -84,8 +87,7 @@ fn process_bam_region(
 
     println!("Variant queue length before loop: {}", variants.len());
 
-    let ref_seq_len = get_ref_len(&bam_reader, &region_chrom)?
-        .ok_or_else(|| "Error: Could not find reference sequence length")?;
+    let ref_seq_len = get_ref_len(&bam_reader, &region_chrom)?;
 
     for read_result in bam_reader.rc_records() {
         let record = read_result?;
