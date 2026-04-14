@@ -17,22 +17,56 @@ struct OutputRow<'a> {
     alt: &'a str,
     vartype: &'a str,
     pos_normalised: f64,
+    depth: u32,
 
     count_a: u32,
-    count_c: u32,
-    count_g: u32,
     count_t: u32,
+    count_g: u32,
+    count_c: u32,
     count_n: u32,
 
-    #[serde(flatten)]
-    base_counts_stats: BaseCountsStats,
+    ref_count: u32,
+    alt_count: u32,
+    alt_vaf: f64,
 
-    #[serde(flatten)]
-    read_features: NormalizedLocusFeaturesRow,
+    ref_nm: Option<f64>,
+    ref_base_qual: Option<f64>,
+    ref_map_qual: Option<f64>,
+    ref_align_len: Option<f64>,
+    ref_clipping: Option<f64>,
+    ref_indel: Option<f64>,
+    ref_forward_strand: Option<f64>,
+    ref_reverse_strand: Option<f64>,
+    ref_supplementary: Option<f64>,
+    ref_normalised_read_position: Option<f64>,
+
+    alt_nm: Option<f64>,
+    alt_base_qual: Option<f64>,
+    alt_map_qual: Option<f64>,
+    alt_align_len: Option<f64>,
+    alt_clipping: Option<f64>,
+    alt_indel: Option<f64>,
+    alt_forward_strand: Option<f64>,
+    alt_reverse_strand: Option<f64>,
+    alt_supplementary: Option<f64>,
+    alt_normalised_read_position: Option<f64>,
+
+    all_nm: Option<f64>,
+    all_base_qual: Option<f64>,
+    all_map_qual: Option<f64>,
+    all_align_len: Option<f64>,
+    all_clipping: Option<f64>,
+    all_indel: Option<f64>,
+    all_forward_strand: Option<f64>,
+    all_reverse_strand: Option<f64>,
+    all_supplementary: Option<f64>,
+    all_normalised_read_position: Option<f64>,
 }
 
 impl<'a> OutputRow<'a> {
     fn from_variant(var: &'a Variant, pos_fraction: f64) -> Self {
+        let bcs = var.base_counts_stats().expect("Could not get base count statistics.");
+        let rf = var.read_features.normalized_row();
         Self {
             chrom: &var.chrom,
             pos: var.pos,
@@ -40,51 +74,60 @@ impl<'a> OutputRow<'a> {
             alt: &var.alt,
             vartype: &var.vartype.as_str(),
             pos_normalised: pos_fraction,
+            depth: bcs.depth,
 
             count_a: var.counts.a,
-            count_c: var.counts.c,
-            count_g: var.counts.g,
             count_t: var.counts.t,
+            count_g: var.counts.g,
+            count_c: var.counts.c,
             count_n: var.counts.n,
 
-            base_counts_stats: var.base_counts_stats().expect("Could not get base count statistics."),
+            ref_count: bcs.ref_count,
+            alt_count: bcs.alt_count,
+            alt_vaf: bcs.alt_vaf,
 
-            read_features: var.read_features.normalized_row(),
+            ref_nm: rf.ref_nm,
+            ref_base_qual: rf.ref_base_qual,
+            ref_map_qual: rf.ref_map_qual,
+            ref_align_len: rf.ref_align_len,
+            ref_clipping: rf.ref_clipping,
+            ref_indel: rf.ref_indel,
+            ref_forward_strand: rf.ref_forward_strand,
+            ref_reverse_strand: rf.ref_reverse_strand,
+            ref_supplementary: rf.ref_supplementary,
+            ref_normalised_read_position: rf.ref_normalised_read_position,
+
+            alt_nm: rf.alt_nm,
+            alt_base_qual: rf.alt_base_qual,
+            alt_map_qual: rf.alt_map_qual,
+            alt_align_len: rf.alt_align_len,
+            alt_clipping: rf.alt_clipping,
+            alt_indel: rf.alt_indel,
+            alt_forward_strand: rf.alt_forward_strand,
+            alt_reverse_strand: rf.alt_reverse_strand,
+            alt_supplementary: rf.alt_supplementary,
+            alt_normalised_read_position: rf.alt_normalised_read_position,
+
+            all_nm: rf.all_nm,
+            all_base_qual: rf.all_base_qual,
+            all_map_qual: rf.all_map_qual,
+            all_align_len: rf.all_align_len,
+            all_clipping: rf.all_clipping,
+            all_indel: rf.all_indel,
+            all_forward_strand: rf.all_forward_strand,
+            all_reverse_strand: rf.all_reverse_strand,
+            all_supplementary: rf.all_supplementary,
+            all_normalised_read_position: rf.all_normalised_read_position,
         }
     }
-}
-
-fn write_header_row(writer: &mut Writer<File>) -> Result<(), Box<dyn Error>> {
-    writer.write_record(&[
-        "chrom", "pos", "ref", "alt", "vartype", "pos_normalised", "depth",
-        "A", "T", "G", "C", "N", "ref_count", "alt_count", "alt_vaf",
-    ])?;
-    Ok(())
 }
 
 fn write_variant_row(
     writer: &mut Writer<File>,
     var: &Variant,
-    base_stats: &BaseCountsStats,
     pos_fraction: f64,
 ) -> Result<(), Box<dyn Error>> {
-    writer.write_record(&[
-        &var.chrom,
-        &var.pos.to_string(),
-        &var.refr,
-        &var.alt,
-        &var.vartype.as_str().to_string(),
-        &pos_fraction.to_string(),
-        &base_stats.depth.to_string(),
-        &var.counts.a.to_string(),
-        &var.counts.t.to_string(),
-        &var.counts.g.to_string(),
-        &var.counts.c.to_string(),
-        &var.counts.n.to_string(),
-        &base_stats.refr_count.to_string(),
-        &base_stats.alt_count.to_string(),
-        &base_stats.alt_vaf.to_string(),
-    ])?;
+    writer.serialize(OutputRow::from_variant(var, pos_fraction))?;
     Ok(())
 }
 
@@ -118,7 +161,6 @@ fn process_bam_region(
     bam_reader.fetch((region_chrom, min_pos - 1, max_pos))?;
 
     let mut csv_writer = Writer::from_path(csv_path)?;
-    write_header_row(&mut csv_writer)?;
 
     let ref_seq_len = get_ref_len(&bam_reader, &region_chrom)?;
 
@@ -135,9 +177,8 @@ fn process_bam_region(
 
             if should_pop {
                 if let Some(var) = variants.pop_front() {
-                    let base_counts_stats = var.base_counts_stats().ok_or("error")?;
                     let pos_fraction = var.get_pos_fraction(ref_seq_len);
-                    write_variant_row(&mut csv_writer, &var, &base_counts_stats, pos_fraction)?;
+                    write_variant_row(&mut csv_writer, &var, pos_fraction)?;
                 }
             } else {
                 break;
@@ -149,11 +190,13 @@ fn process_bam_region(
             let read_end = read_start + record.seq_len() as u64;
 
             if zero_based_pos >= read_start && zero_based_pos < read_end {
-                let base = seq[(zero_based_pos - read_start) as usize] as char;
+                let qpos = (zero_based_pos - read_start) as usize;
+                let base = seq[qpos] as char;
                 var.counts.count(base);
+                // Can probably rewrite this (maybe calculate in Variants? so var.count_read_features?)
                 let refr_char = var.refr.chars().next().ok_or("Could not get refr char")?;
                 let alt_char = var.alt.chars().next().ok_or("Could not get alt char")?;
-                var.read_features.count(&record, base, refr_char, alt_char, zero_based_pos);
+                var.read_features.count(&record, base, refr_char, alt_char, qpos as u64);
             } else {
                 break;
             }
@@ -161,9 +204,8 @@ fn process_bam_region(
     }
 
     while let Some(var) = variants.pop_front() {
-        let base_counts_stats = var.base_counts_stats().ok_or("error")?;
         let pos_fraction = var.get_pos_fraction(ref_seq_len);
-        write_variant_row(&mut csv_writer, &var, &base_counts_stats, pos_fraction)?;
+        write_variant_row(&mut csv_writer, &var, pos_fraction)?;
     }
     csv_writer.flush()?;
 
