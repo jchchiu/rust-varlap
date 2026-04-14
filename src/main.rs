@@ -4,26 +4,60 @@ use std::collections::VecDeque;
 use std::error::Error;
 use std::rc::Rc;
 use csv::Writer;
+use serde::Serialize;
 use rust_htslib::bam::{Read, IndexedReader, Record};
 use rust_htslib::bam::record::{Aux, Cigar};
 
+#[derive(serde::Serialize)]
+struct OutputRow<'a> {
+    chrom: &'a str,
+    pos: u64,
+    #[serde(rename = "ref")]
+    refr: &'a str,
+    alt: &'a str,
+    vartype: &'a str,
+    pos_normalised: f64,
+
+    count_a: u32,
+    count_c: u32,
+    count_g: u32,
+    count_t: u32,
+    count_n: u32,
+
+    #[serde(flatten)]
+    base_counts_stats: BaseCountsStats,
+
+    #[serde(flatten)]
+    read_features: NormalizedLocusFeaturesRow,
+}
+
+impl<'a> OutputRow<'a> {
+    fn from_variant(var: &'a Variant, pos_fraction: f64) -> Self {
+        Self {
+            chrom: &var.chrom,
+            pos: var.pos,
+            refr: &var.refr,
+            alt: &var.alt,
+            vartype: &var.vartype.as_str(),
+            pos_normalised: pos_fraction,
+
+            count_a: var.counts.a,
+            count_c: var.counts.c,
+            count_g: var.counts.g,
+            count_t: var.counts.t,
+            count_n: var.counts.n,
+
+            base_counts_stats: var.base_counts_stats().expect("Could not get base count statistics."),
+
+            read_features: var.read_features.normalized_row(),
+        }
+    }
+}
+
 fn write_header_row(writer: &mut Writer<File>) -> Result<(), Box<dyn Error>> {
     writer.write_record(&[
-        "chrom",
-        "pos",
-        "ref",
-        "alt",
-        "vartype",
-        "pos_normalised",
-        "depth",
-        "A",
-        "T",
-        "G",
-        "C",
-        "N",
-        "ref_count",
-        "alt_count",
-        "alt_vaf",
+        "chrom", "pos", "ref", "alt", "vartype", "pos_normalised", "depth",
+        "A", "T", "G", "C", "N", "ref_count", "alt_count", "alt_vaf",
     ])?;
     Ok(())
 }
@@ -51,33 +85,6 @@ fn write_variant_row(
         &base_stats.alt_count.to_string(),
         &base_stats.alt_vaf.to_string(),
     ])?;
-    Ok(())
-}
-
-fn print_header_row() -> Result<(), Box<dyn Error>> {
-    println!("chrom\tpos\tref\talt\tvartype\tpos_normalised\tdepth\tA\tT\tG\tC\tN\tref_count\talt_count\talt_vaf");
-    Ok(())
-}
-
-fn print_variant_row(var: &Variant, base_stats: &BaseCountsStats, pos_fraction: f64) -> Result<(), Box<dyn Error>> {
-    println!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-        var.chrom,
-        var.pos,
-        var.refr,
-        var.alt,
-        var.vartype.as_str(),
-        pos_fraction,
-        base_stats.depth,
-        var.counts.a,
-        var.counts.t,
-        var.counts.g,
-        var.counts.c,
-        var.counts.n,
-        base_stats.refr_count,
-        base_stats.alt_count,
-        base_stats.alt_vaf,
-    );
     Ok(())
 }
 
@@ -112,7 +119,6 @@ fn process_bam_region(
 
     let mut csv_writer = Writer::from_path(csv_path)?;
     write_header_row(&mut csv_writer)?;
-    print_header_row()?;
 
     let ref_seq_len = get_ref_len(&bam_reader, &region_chrom)?;
 
@@ -131,7 +137,6 @@ fn process_bam_region(
                 if let Some(var) = variants.pop_front() {
                     let base_counts_stats = var.base_counts_stats().ok_or("error")?;
                     let pos_fraction = var.get_pos_fraction(ref_seq_len);
-                    print_variant_row(&var, &base_counts_stats, pos_fraction)?;
                     write_variant_row(&mut csv_writer, &var, &base_counts_stats, pos_fraction)?;
                 }
             } else {
@@ -145,7 +150,10 @@ fn process_bam_region(
 
             if zero_based_pos >= read_start && zero_based_pos < read_end {
                 let base = seq[(zero_based_pos - read_start) as usize] as char;
-                var.counts.increment(base);
+                var.counts.count(base);
+                let refr_char = var.refr.chars().next().ok_or("Could not get refr char")?;
+                let alt_char = var.alt.chars().next().ok_or("Could not get alt char")?;
+                var.read_features.count(&record, base, refr_char, alt_char, zero_based_pos);
             } else {
                 break;
             }
@@ -155,7 +163,6 @@ fn process_bam_region(
     while let Some(var) = variants.pop_front() {
         let base_counts_stats = var.base_counts_stats().ok_or("error")?;
         let pos_fraction = var.get_pos_fraction(ref_seq_len);
-        print_variant_row(&var, &base_counts_stats, pos_fraction)?;
         write_variant_row(&mut csv_writer, &var, &base_counts_stats, pos_fraction)?;
     }
     csv_writer.flush()?;
@@ -212,6 +219,7 @@ fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<
                     alt: alt.to_string(),
                     vartype,
                     counts: BaseCounts::default(),
+                    read_features: LocusFeaturesSNV::default(),
                 });
             }
         } else {
@@ -222,10 +230,10 @@ fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<
 	Ok(variants)
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 struct BaseCountsStats {
     depth: u32,
-    refr_count: u32,
+    ref_count: u32,
     alt_count: u32,
     alt_vaf: f64,
 }
@@ -240,7 +248,7 @@ struct BaseCounts {
 }
 
 impl BaseCounts {
-    fn increment(&mut self, base: char) {
+    fn count(&mut self, base: char) {
         match base {
             'A' => self.a += 1,
             'C' => self.c += 1,
@@ -268,7 +276,7 @@ impl BaseCounts {
 
     fn stats(&self, refr: char, alt: char) -> BaseCountsStats {
         let depth = self.depth();
-        let refr_count = self.count_for_base(refr);
+        let ref_count = self.count_for_base(refr);
         let alt_count = self.count_for_base(alt);
         let alt_vaf = if depth > 0 {
             alt_count as f64 / depth as f64
@@ -278,11 +286,63 @@ impl BaseCounts {
 
         BaseCountsStats {
             depth,
-            refr_count,
+            ref_count,
             alt_count,
             alt_vaf,
         }
     }
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize)]
+struct NormalizedLocusFeaturesRow {
+    ref_nm: Option<f64>,
+    ref_base_qual: Option<f64>,
+    ref_map_qual: Option<f64>,
+    ref_align_len: Option<f64>,
+    ref_clipping: Option<f64>,
+    ref_indel: Option<f64>,
+    ref_forward_strand: Option<f64>,
+    ref_reverse_strand: Option<f64>,
+    ref_supplementary: Option<f64>,
+    ref_normalised_read_position: Option<f64>,
+
+    alt_nm: Option<f64>,
+    alt_base_qual: Option<f64>,
+    alt_map_qual: Option<f64>,
+    alt_align_len: Option<f64>,
+    alt_clipping: Option<f64>,
+    alt_indel: Option<f64>,
+    alt_forward_strand: Option<f64>,
+    alt_reverse_strand: Option<f64>,
+    alt_supplementary: Option<f64>,
+    alt_normalised_read_position: Option<f64>,
+
+    all_nm: Option<f64>,
+    all_base_qual: Option<f64>,
+    all_map_qual: Option<f64>,
+    all_align_len: Option<f64>,
+    all_clipping: Option<f64>,
+    all_indel: Option<f64>,
+    all_forward_strand: Option<f64>,
+    all_reverse_strand: Option<f64>,
+    all_supplementary: Option<f64>,
+    all_normalised_read_position: Option<f64>,
+}
+
+// Use option or not? Because in python script if there are no values it defaults to ''
+// Compared to default which would initialize it as 0.0
+#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
+struct NormalizedReadFeatures {
+    nm: Option<f64>,
+    base_qual: Option<f64>,
+    map_qual: Option<f64>,
+    align_len: Option<f64>,
+    clipping: Option<f64>,
+    indel: Option<f64>,
+    forward_strand: Option<f64>,
+    reverse_strand: Option<f64>,
+    supplementary: Option<f64>,
+    normalised_read_position: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -301,7 +361,7 @@ struct ReadFeatures {
 }
 
 impl ReadFeatures {
-    fn increment(
+    fn count(
         &mut self,
         read: &Rc<Record>,
         query_pos: u64,
@@ -320,9 +380,6 @@ impl ReadFeatures {
 
         for c in read.cigar().iter() {
             match *c {
-                Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
-                    // matches (not directly used here)
-                }
                 Cigar::Ins(len) | Cigar::Del(len) => self.indel += len as u32,
                 Cigar::SoftClip(len) | Cigar::HardClip(len) => self.clipping += len as u32,
                 _ => {}
@@ -352,23 +409,23 @@ impl ReadFeatures {
 
     }
 
-    fn as_list(&self) -> [f64; 10] {
+    fn normalized(&self) -> NormalizedReadFeatures {
         if self.num_reads > 0 {
             let n = self.num_reads as f64;
-            [
-            self.nm as f64 / n,
-            self.base_qual as f64 / n,
-            self.map_qual as f64 / n,
-            self.align_len as f64 / n,
-            self.clipping as f64 / n,
-            self.indel as f64 / n,
-            self.forward_strand as f64 / n,
-            self.reverse_strand as f64 / n,
-            self.supplementary as f64 / n,
-            self.normalised_read_position / n,
-            ]
+            NormalizedReadFeatures {
+                nm: Some(self.nm as f64 / n),
+                base_qual: Some(self.base_qual as f64 / n),
+                map_qual: Some(self.map_qual as f64 / n),
+                align_len: Some(self.align_len as f64 / n),
+                clipping: Some(self.clipping as f64 / n),
+                indel: Some(self.indel as f64 / n),
+                forward_strand: Some(self.forward_strand as f64 / n),
+                reverse_strand: Some(self.reverse_strand as f64 / n),
+                supplementary: Some(self.supplementary as f64 / n),
+                normalised_read_position: Some(self.normalised_read_position / n),
+            }
         } else {
-            [0.0; 10]
+            NormalizedReadFeatures::default()
         }
     }
 }
@@ -378,6 +435,58 @@ struct LocusFeaturesSNV {
     ref_read_features: ReadFeatures,
     alt_read_features: ReadFeatures,
     all_read_features: ReadFeatures,
+}
+
+impl LocusFeaturesSNV {
+    fn count(&mut self, read: &Rc<Record>, base: char, refr: char, alt: char, query_pos: u64) {
+        if base == refr {
+            self.ref_read_features.count(&read, query_pos);
+        } else if base == alt{
+            self.alt_read_features.count(&read, query_pos);
+        }
+        self.all_read_features.count(&read, query_pos);
+    }
+
+    fn normalized_row(&self) -> NormalizedLocusFeaturesRow {
+        let r = self.ref_read_features.normalized();
+        let a = self.alt_read_features.normalized();
+        let all = self.all_read_features.normalized();
+
+        NormalizedLocusFeaturesRow {
+            ref_nm: r.nm,
+            ref_base_qual: r.base_qual,
+            ref_map_qual: r.map_qual,
+            ref_align_len: r.align_len,
+            ref_clipping: r.clipping,
+            ref_indel: r.indel,
+            ref_forward_strand: r.forward_strand,
+            ref_reverse_strand: r.reverse_strand,
+            ref_supplementary: r.supplementary,
+            ref_normalised_read_position: r.normalised_read_position,
+
+            alt_nm: a.nm,
+            alt_base_qual: a.base_qual,
+            alt_map_qual: a.map_qual,
+            alt_align_len: a.align_len,
+            alt_clipping: a.clipping,
+            alt_indel: a.indel,
+            alt_forward_strand: a.forward_strand,
+            alt_reverse_strand: a.reverse_strand,
+            alt_supplementary: a.supplementary,
+            alt_normalised_read_position: a.normalised_read_position,
+
+            all_nm: all.nm,
+            all_base_qual: all.base_qual,
+            all_map_qual: all.map_qual,
+            all_align_len: all.align_len,
+            all_clipping: all.clipping,
+            all_indel: all.indel,
+            all_forward_strand: all.forward_strand,
+            all_reverse_strand: all.reverse_strand,
+            all_supplementary: all.supplementary,
+            all_normalised_read_position: all.normalised_read_position,
+        }
+    }    
 }
 
 #[derive(Debug, Clone)]
