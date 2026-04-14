@@ -2,8 +2,10 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::collections::VecDeque;
 use std::error::Error;
+use std::rc::Rc;
 use csv::Writer;
-use rust_htslib::bam::{Read, IndexedReader};
+use rust_htslib::bam::{Read, IndexedReader, Record};
+use rust_htslib::bam::record::{Aux, Cigar};
 
 fn write_header_row(writer: &mut Writer<File>) -> Result<(), Box<dyn Error>> {
     writer.write_record(&[
@@ -283,6 +285,101 @@ impl BaseCounts {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct ReadFeatures {
+    nm: u32,
+    base_qual: u32,
+    map_qual: u32,
+    align_len: u32,
+    clipping: u32,
+    indel: u32,
+    forward_strand: u32,
+    reverse_strand: u32,
+    supplementary: u32,
+    normalised_read_position: f64, 
+    num_reads: u32,
+}
+
+impl ReadFeatures {
+    fn increment(
+        &mut self,
+        read: &Rc<Record>,
+        query_pos: u64,
+    ) {
+        self.num_reads += 1;
+        let query_len = read.seq_len();
+        if query_len > 0 {
+            self.normalised_read_position += query_pos as f64 / query_len as f64;
+        }
+        // Can maybe to Some(pos_qual) = read.qual().get() if want to return an Option for safety
+        let pos_qual = read.qual()[query_pos as usize];
+        self.base_qual += pos_qual as u32;
+
+        self.align_len += query_len as u32;
+        self.map_qual += read.mapq() as u32;
+
+        for c in read.cigar().iter() {
+            match *c {
+                Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
+                    // matches (not directly used here)
+                }
+                Cigar::Ins(len) | Cigar::Del(len) => self.indel += len as u32,
+                Cigar::SoftClip(len) | Cigar::HardClip(len) => self.clipping += len as u32,
+                _ => {}
+            }
+        }
+
+        if let Ok(aux) = read.aux(b"NM") {
+            match aux {
+                Aux::I8(v) => self.nm += v as u32,
+                Aux::U8(v) => self.nm += v as u32,
+                Aux::I16(v) => self.nm += v as u32,
+                Aux::U16(v) => self.nm += v as u32,
+                Aux::I32(v) => self.nm += v as u32,
+                Aux::U32(v) => self.nm += v as u32,
+                _ => {}
+            }
+        }
+
+        if read.is_reverse() {
+            self.reverse_strand += 1;
+        } else {
+            self.forward_strand += 1;
+        }
+        if read.is_supplementary() {
+            self.supplementary += 1;
+        }
+
+    }
+
+    fn as_list(&self) -> [f64; 10] {
+        if self.num_reads > 0 {
+            let n = self.num_reads as f64;
+            [
+            self.nm as f64 / n,
+            self.base_qual as f64 / n,
+            self.map_qual as f64 / n,
+            self.align_len as f64 / n,
+            self.clipping as f64 / n,
+            self.indel as f64 / n,
+            self.forward_strand as f64 / n,
+            self.reverse_strand as f64 / n,
+            self.supplementary as f64 / n,
+            self.normalised_read_position / n,
+            ]
+        } else {
+            [0.0; 10]
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct LocusFeaturesSNV {
+    ref_read_features: ReadFeatures,
+    alt_read_features: ReadFeatures,
+    all_read_features: ReadFeatures,
+}
+
 #[derive(Debug, Clone)]
 struct Variant {
 	chrom: String,
@@ -291,6 +388,7 @@ struct Variant {
 	alt: String,
     vartype: VarType,
 	counts: BaseCounts,
+    read_features: LocusFeaturesSNV,
 }
 
 impl Variant {
