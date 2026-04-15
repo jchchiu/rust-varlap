@@ -76,11 +76,11 @@ impl<'a> OutputRow<'a> {
             pos_normalised: pos_fraction,
             depth: bcs.depth,
 
-            count_a: var.counts.a,
-            count_t: var.counts.t,
-            count_g: var.counts.g,
-            count_c: var.counts.c,
-            count_n: var.counts.n,
+            count_a: var.read_features.base_counts.a,
+            count_t: var.read_features.base_counts.t,
+            count_g: var.read_features.base_counts.g,
+            count_c: var.read_features.base_counts.c,
+            count_n: var.read_features.base_counts.n,
 
             ref_count: bcs.ref_count,
             alt_count: bcs.alt_count,
@@ -228,12 +228,7 @@ fn process_bam_region(
 
             if let Some(qpos) = ref_pos_to_query_pos(read_start, zero_based_pos, &record) {
                 let base = seq[qpos] as char;
-                // COMBINE BASECOUNTS WITH READFEATURES!
-                var.counts.count(base);
-                // Can probably rewrite this (maybe calculate in Variants? so var.count_read_features?)
-                let refr_char = var.refr.chars().next().ok_or("Could not get refr char")?;
-                let alt_char = var.alt.chars().next().ok_or("Could not get alt char")?;
-                var.read_features.count(&record, base, refr_char, alt_char, qpos as u64);
+                var.count_locus_features(&record, base, qpos as u64);
             } else {
                 break;
             }
@@ -297,7 +292,6 @@ fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<
                     refr: refr.clone(),
                     alt: alt.to_string(),
                     vartype,
-                    counts: BaseCounts::default(),
                     read_features: LocusFeaturesSNV::default(),
                 });
             }
@@ -511,6 +505,7 @@ impl ReadFeatures {
 
 #[derive(Debug, Clone, Default)]
 struct LocusFeaturesSNV {
+    base_counts: BaseCounts,
     ref_read_features: ReadFeatures,
     alt_read_features: ReadFeatures,
     all_read_features: ReadFeatures,
@@ -518,6 +513,8 @@ struct LocusFeaturesSNV {
 
 impl LocusFeaturesSNV {
     fn count(&mut self, read: &Rc<Record>, base: char, refr: char, alt: char, query_pos: u64) {
+        self.base_counts.count(base);
+
         if base == refr {
             self.ref_read_features.count(&read, query_pos);
         } else if base == alt{
@@ -575,7 +572,6 @@ struct Variant {
 	refr: String,
 	alt: String,
     vartype: VarType,
-	counts: BaseCounts,
     read_features: LocusFeaturesSNV,
 }
 
@@ -583,7 +579,15 @@ impl Variant {
     fn base_counts_stats(&self) -> Option<BaseCountsStats> {
         let ref_char = self.refr.chars().next()?;
         let alt_char = self.alt.chars().next()?;
-        Some(self.counts.stats(ref_char, alt_char))
+        Some(self.read_features.base_counts.stats(ref_char, alt_char))
+    }
+
+    fn count_locus_features(&mut self, read: &Rc<Record>, base: char, qpos: u64) {
+        if let (Some(refr_char), Some(alt_char)) =
+            (self.refr.chars().next(), self.alt.chars().next())
+        {
+            self.read_features.count(read, base, refr_char, alt_char, qpos);
+        }
     }
 
     fn get_pos_fraction(&self, ref_seq_len: u64) -> f64 {
