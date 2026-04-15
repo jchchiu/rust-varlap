@@ -149,6 +149,44 @@ fn get_ref_len(
     Err(format!("Could not find reference '{}' in BAM header", chrom).into())
 }
 
+fn ref_pos_to_query_pos (mut ref_pos: u64, target_pos: u64, read: &Rc<Record>) -> Option<usize> {
+    let mut read_pos = 0usize;
+
+    for cigar in read.cigar().iter() {
+        match *cigar {
+            Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
+                let len = len as u64;
+
+                if target_pos >= ref_pos && target_pos < ref_pos + len {
+                    let offset = (target_pos - ref_pos) as usize;
+                    return Some(read_pos + offset);
+                }
+
+                ref_pos += len;
+                read_pos += len as usize;
+            }
+
+            Cigar::Ins(len) | Cigar::SoftClip(len) => {
+                read_pos += len as usize;
+            }
+
+            Cigar::Del(len) | Cigar::RefSkip(len) => {
+                let len = len as u64;
+
+                if target_pos >= ref_pos && target_pos < ref_pos + len {
+                    return None; // target is in a deletion/refskip
+                }
+
+                ref_pos += len;
+            }
+
+            Cigar::HardClip(_) | Cigar::Pad(_) => {}
+        }
+    }
+
+    None
+}
+
 fn process_bam_region(
     variants: &mut VecDeque<Variant>,
     bam_path: &str,
@@ -187,11 +225,10 @@ fn process_bam_region(
 
         for var in &mut *variants {
             let zero_based_pos = var.pos - 1;
-            let read_end = read_start + record.seq_len() as u64;
 
-            if zero_based_pos >= read_start && zero_based_pos < read_end {
-                let qpos = (zero_based_pos - read_start) as usize;
+            if let Some(qpos) = ref_pos_to_query_pos(read_start, zero_based_pos, &record) {
                 let base = seq[qpos] as char;
+                // COMBINE BASECOUNTS WITH READFEATURES!
                 var.counts.count(base);
                 // Can probably rewrite this (maybe calculate in Variants? so var.count_read_features?)
                 let refr_char = var.refr.chars().next().ok_or("Could not get refr char")?;
@@ -544,9 +581,9 @@ struct Variant {
 
 impl Variant {
     fn base_counts_stats(&self) -> Option<BaseCountsStats> {
-        let refr_char = self.refr.chars().next()?;
+        let ref_char = self.refr.chars().next()?;
         let alt_char = self.alt.chars().next()?;
-        Some(self.counts.stats(refr_char, alt_char))
+        Some(self.counts.stats(ref_char, alt_char))
     }
 
     fn get_pos_fraction(&self, ref_seq_len: u64) -> f64 {
