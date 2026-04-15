@@ -298,7 +298,7 @@ impl ReadFeatures {
         query_pos: u64,
     ) {
         self.num_reads += 1;
-        let query_len = read.seq_len();
+        let query_len = self.query_alignment_length(&read) as usize;
         if query_len > 0 {
             self.normalised_read_position += query_pos as f64 / query_len as f64;
         }
@@ -338,6 +338,20 @@ impl ReadFeatures {
             self.supplementary += 1;
         }
 
+    }
+
+    fn query_alignment_length(&self, record: &Rc<Record>) -> u32 {
+        record
+            .cigar()
+            .iter()
+            .map(|c| match *c {
+                Cigar::Match(len) => len,
+                Cigar::Equal(len) => len,
+                Cigar::Diff(len) => len,
+                Cigar::Ins(len) => len,
+                _ => 0,
+            })
+            .sum()
     }
 
     fn normalized(&self) -> NormalizedReadFeatures {
@@ -441,42 +455,57 @@ fn get_ref_len(
     Err(format!("Could not find reference '{}' in BAM header", chrom).into())
 }
 
-fn ref_pos_to_query_pos (mut ref_pos: u64, target_pos: u64, read: &Rc<Record>) -> Option<usize> {
-    let mut read_pos = 0usize;
+fn ref_pos_to_query_pos (read: &Rc<Record>, target_pos: u64) -> Option<u32> {
+    // let mut ref_pos = read.pos() as u64;
+    // let mut read_position = 0usize;
 
-    for cigar in read.cigar().iter() {
-        match *cigar {
-            Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
-                let len = len as u64;
+    let cigar = read.cigar();
 
-                if target_pos >= ref_pos && target_pos < ref_pos + len {
-                    let offset = (target_pos - ref_pos) as usize;
-                    return Some(read_pos + offset);
-                }
+    cigar.read_pos(target_pos as u32, false, false).ok()?
 
-                ref_pos += len;
-                read_pos += len as usize;
-            }
+    // let cigar_soft = cigar.read_pos(target_pos as u32, true, false).ok()?;
+    // let cigar_dels = cigar.read_pos(target_pos as u32, false, true).ok()?;
+    // let cigar_both = cigar.read_pos(target_pos as u32, true, true).ok()?;
+    // let cigar_none = cigar.read_pos(target_pos as u32, false, false).ok()?;
 
-            Cigar::Ins(len) | Cigar::SoftClip(len) => {
-                read_pos += len as usize;
-            }
+    // for cigar in read.cigar().iter() {
+    //     match *cigar {
+    //         Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
+    //             let len = len as u64;
 
-            Cigar::Del(len) | Cigar::RefSkip(len) => {
-                let len = len as u64;
+    //             if target_pos >= ref_pos && target_pos < ref_pos + len {
+    //                 let offset = (target_pos - ref_pos) as usize;
+    //                 if target_pos == 15340 {
+    //                     println!("Variant position: {}", target_pos);
+    //                     println!("Cigar soft: {:?}, Cigar dels: {:?}, Cigar both: {:?}, Cigar none: {:?}", cigar_soft, cigar_dels, cigar_both, cigar_none);
+    //                     println!("Caculated Cigar: {:?}", Some(read_position + offset));
+    //                 }
+    //                 return Some(read_position + offset);
+    //             }
 
-                if target_pos >= ref_pos && target_pos < ref_pos + len {
-                    return None; // target is in a deletion/refskip
-                }
+    //             ref_pos += len;
+    //             read_position += len as usize;
+    //         }
 
-                ref_pos += len;
-            }
+    //         Cigar::Ins(len) | Cigar::SoftClip(len) => {
+    //             read_position += len as usize;
+    //         }
 
-            Cigar::HardClip(_) | Cigar::Pad(_) => {}
-        }
-    }
+    //         Cigar::Del(len) | Cigar::RefSkip(len) => {
+    //             let len = len as u64;
 
-    None
+    //             if target_pos >= ref_pos && target_pos < ref_pos + len {
+    //                 return None; // target is in a deletion/refskip
+    //             }
+
+    //             ref_pos += len;
+    //         }
+
+    //         Cigar::HardClip(_) | Cigar::Pad(_) => {}
+    //     }
+    // }
+
+    // None
 }
 
 fn process_bam_region(
@@ -519,11 +548,11 @@ fn process_bam_region(
         for var in &mut *variants {
             let zero_based_pos = var.pos - 1;
 
-            if let Some(qpos) = ref_pos_to_query_pos(read_start, zero_based_pos, &record) {
-                let base = seq[qpos] as char;
+            if let Some(qpos) = ref_pos_to_query_pos(&record, zero_based_pos) {
+                let base = seq[qpos as usize] as char;
                 var.count_locus_features(&record, base, qpos as u64);
             } else {
-                break;
+                continue;
             }
         }
     }
