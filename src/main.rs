@@ -8,248 +8,23 @@ use serde::Serialize;
 use rust_htslib::bam::{Read, IndexedReader, Record};
 use rust_htslib::bam::record::{Aux, Cigar};
 
-#[derive(serde::Serialize)]
-struct OutputRow<'a> {
-    chrom: &'a str,
-    pos: u64,
-    #[serde(rename = "ref")]
-    refr: &'a str,
-    alt: &'a str,
-    vartype: &'a str,
-    pos_normalised: f64,
-    depth: u32,
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let vcf_path = "/home/jch/genomic-data/chrM_heavy_stress.vcf";
+    let bam_path = "/home/jch/genomic-data/chrM_heavy_stress.sorted.bam";
+    let varclass = "SNV";
+    let csv_path = "/home/jch/git/rust-varlap/test_data/rust-varlap.output.csv";
+    let sample = "";
+    
+    let mut variants = vcf_reader(&vcf_path, &varclass)?;
 
-    count_a: u32,
-    count_t: u32,
-    count_g: u32,
-    count_c: u32,
-    count_n: u32,
+    let (region_chrom, min_pos, max_pos) = 
+        get_vcf_min_max(&variants).ok_or("Could not determine VCF min/max")?;
 
-    ref_count: u32,
-    alt_count: u32,
-    alt_vaf: f64,
+    println!("Region Chromosome: {}, Min Pos: {}, Max Pos: {}", &region_chrom, min_pos, max_pos);
 
-    ref_nm: Option<f64>,
-    ref_base_qual: Option<f64>,
-    ref_map_qual: Option<f64>,
-    ref_align_len: Option<f64>,
-    ref_clipping: Option<f64>,
-    ref_indel: Option<f64>,
-    ref_forward_strand: Option<f64>,
-    ref_reverse_strand: Option<f64>,
-    ref_supplementary: Option<f64>,
-    ref_normalised_read_position: Option<f64>,
+    process_bam_region(&mut variants, &bam_path, &region_chrom, min_pos, max_pos, &csv_path, &sample)?;
 
-    alt_nm: Option<f64>,
-    alt_base_qual: Option<f64>,
-    alt_map_qual: Option<f64>,
-    alt_align_len: Option<f64>,
-    alt_clipping: Option<f64>,
-    alt_indel: Option<f64>,
-    alt_forward_strand: Option<f64>,
-    alt_reverse_strand: Option<f64>,
-    alt_supplementary: Option<f64>,
-    alt_normalised_read_position: Option<f64>,
-
-    all_nm: Option<f64>,
-    all_base_qual: Option<f64>,
-    all_map_qual: Option<f64>,
-    all_align_len: Option<f64>,
-    all_clipping: Option<f64>,
-    all_indel: Option<f64>,
-    all_forward_strand: Option<f64>,
-    all_reverse_strand: Option<f64>,
-    all_supplementary: Option<f64>,
-    all_normalised_read_position: Option<f64>,
-}
-
-impl<'a> OutputRow<'a> {
-    fn from_variant(var: &'a Variant, pos_fraction: f64) -> Self {
-        let bcs = var.base_counts_stats().expect("Could not get base count statistics.");
-        let rf = var.read_features.normalized_row();
-        Self {
-            chrom: &var.chrom,
-            pos: var.pos,
-            refr: &var.refr,
-            alt: &var.alt,
-            vartype: &var.vartype.as_str(),
-            pos_normalised: pos_fraction,
-            depth: bcs.depth,
-
-            count_a: var.read_features.base_counts.a,
-            count_t: var.read_features.base_counts.t,
-            count_g: var.read_features.base_counts.g,
-            count_c: var.read_features.base_counts.c,
-            count_n: var.read_features.base_counts.n,
-
-            ref_count: bcs.ref_count,
-            alt_count: bcs.alt_count,
-            alt_vaf: bcs.alt_vaf,
-
-            ref_nm: rf.ref_nm,
-            ref_base_qual: rf.ref_base_qual,
-            ref_map_qual: rf.ref_map_qual,
-            ref_align_len: rf.ref_align_len,
-            ref_clipping: rf.ref_clipping,
-            ref_indel: rf.ref_indel,
-            ref_forward_strand: rf.ref_forward_strand,
-            ref_reverse_strand: rf.ref_reverse_strand,
-            ref_supplementary: rf.ref_supplementary,
-            ref_normalised_read_position: rf.ref_normalised_read_position,
-
-            alt_nm: rf.alt_nm,
-            alt_base_qual: rf.alt_base_qual,
-            alt_map_qual: rf.alt_map_qual,
-            alt_align_len: rf.alt_align_len,
-            alt_clipping: rf.alt_clipping,
-            alt_indel: rf.alt_indel,
-            alt_forward_strand: rf.alt_forward_strand,
-            alt_reverse_strand: rf.alt_reverse_strand,
-            alt_supplementary: rf.alt_supplementary,
-            alt_normalised_read_position: rf.alt_normalised_read_position,
-
-            all_nm: rf.all_nm,
-            all_base_qual: rf.all_base_qual,
-            all_map_qual: rf.all_map_qual,
-            all_align_len: rf.all_align_len,
-            all_clipping: rf.all_clipping,
-            all_indel: rf.all_indel,
-            all_forward_strand: rf.all_forward_strand,
-            all_reverse_strand: rf.all_reverse_strand,
-            all_supplementary: rf.all_supplementary,
-            all_normalised_read_position: rf.all_normalised_read_position,
-        }
-    }
-}
-
-fn write_variant_row(
-    writer: &mut Writer<File>,
-    var: &Variant,
-    pos_fraction: f64,
-) -> Result<(), Box<dyn Error>> {
-    writer.serialize(OutputRow::from_variant(var, pos_fraction))?;
     Ok(())
-}
-
-fn get_ref_len(
-    bam_reader: &IndexedReader,
-    chrom: &str,
-) -> Result<u64, Box<dyn std::error::Error>> {
-    let header = bam_reader.header();
-
-    for tid in 0..header.target_count() {
-        let name = std::str::from_utf8(header.tid2name(tid))?;
-        if name == chrom {
-            return header
-                .target_len(tid)
-                .ok_or_else(|| format!("Reference '{}' found, but has no length", chrom).into());
-        }
-    }
-
-    Err(format!("Could not find reference '{}' in BAM header", chrom).into())
-}
-
-fn ref_pos_to_query_pos (mut ref_pos: u64, target_pos: u64, read: &Rc<Record>) -> Option<usize> {
-    let mut read_pos = 0usize;
-
-    for cigar in read.cigar().iter() {
-        match *cigar {
-            Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
-                let len = len as u64;
-
-                if target_pos >= ref_pos && target_pos < ref_pos + len {
-                    let offset = (target_pos - ref_pos) as usize;
-                    return Some(read_pos + offset);
-                }
-
-                ref_pos += len;
-                read_pos += len as usize;
-            }
-
-            Cigar::Ins(len) | Cigar::SoftClip(len) => {
-                read_pos += len as usize;
-            }
-
-            Cigar::Del(len) | Cigar::RefSkip(len) => {
-                let len = len as u64;
-
-                if target_pos >= ref_pos && target_pos < ref_pos + len {
-                    return None; // target is in a deletion/refskip
-                }
-
-                ref_pos += len;
-            }
-
-            Cigar::HardClip(_) | Cigar::Pad(_) => {}
-        }
-    }
-
-    None
-}
-
-fn process_bam_region(
-    variants: &mut VecDeque<Variant>,
-    bam_path: &str,
-    region_chrom: &str, 
-    min_pos: u64, 
-    max_pos: u64,
-    csv_path: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut bam_reader = IndexedReader::from_path(bam_path)?;
-    bam_reader.fetch((region_chrom, min_pos - 1, max_pos))?;
-
-    let mut csv_writer = Writer::from_path(csv_path)?;
-
-    let ref_seq_len = get_ref_len(&bam_reader, &region_chrom)?;
-
-    for read_result in bam_reader.rc_records() {
-        let record = read_result?;
-        let read_start = record.pos() as u64;
-        let seq = record.seq();
-
-        loop {
-            let should_pop = match variants.front() {
-                Some(var) => (read_start + 1) > var.pos,
-                None => false,
-            };
-
-            if should_pop {
-                if let Some(var) = variants.pop_front() {
-                    let pos_fraction = var.get_pos_fraction(ref_seq_len);
-                    write_variant_row(&mut csv_writer, &var, pos_fraction)?;
-                }
-            } else {
-                break;
-            }
-        }
-
-        for var in &mut *variants {
-            let zero_based_pos = var.pos - 1;
-
-            if let Some(qpos) = ref_pos_to_query_pos(read_start, zero_based_pos, &record) {
-                let base = seq[qpos] as char;
-                var.count_locus_features(&record, base, qpos as u64);
-            } else {
-                break;
-            }
-        }
-    }
-
-    while let Some(var) = variants.pop_front() {
-        let pos_fraction = var.get_pos_fraction(ref_seq_len);
-        write_variant_row(&mut csv_writer, &var, pos_fraction)?;
-    }
-    csv_writer.flush()?;
-
-    Ok(()) 
-}
-
-fn varclass_matches(varclass: &str, vartype: &VarType) -> bool {
-    match varclass.to_ascii_uppercase().as_str() {
-        "SNV" => matches!(vartype, VarType::Snv | VarType::Unknown),
-        "INDEL" => matches!(vartype, VarType::Ins | VarType::Del | VarType::Unknown),
-        _ => false,
-    }
 }
 
 fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<dyn Error>> {
@@ -289,7 +64,7 @@ fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<
                 variants.push_back(Variant {
                     chrom: chrom.clone(),
                     pos,
-                    refr: refr.clone(),
+                    refr: refr.clone(), 
                     alt: alt.to_string(),
                     vartype,
                     read_features: LocusFeaturesSNV::default(),
@@ -303,12 +78,139 @@ fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<
 	Ok(variants)
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
-struct BaseCountsStats {
-    depth: u32,
-    ref_count: u32,
-    alt_count: u32,
-    alt_vaf: f64,
+#[derive(Debug, Clone, Copy)]
+enum VarType {
+    Snv,
+    Del,
+    Ins,
+    Unknown,
+}
+
+impl VarType {
+    fn as_str(&self) -> &'static str {
+        match self {
+            VarType::Snv => "SNV",
+            VarType::Del => "DEL",
+            VarType::Ins => "INS",
+            VarType::Unknown => "UNKNOWN",            
+        }
+    }
+}
+
+fn get_var_type(refr: &str, alt: & str) -> VarType {
+    if refr.len() == 1 && alt.len() == 1 {
+        VarType::Snv
+    } else if refr.len() > alt.len() {
+        VarType::Del
+    } else if refr.len() < alt.len() {
+        VarType::Ins
+    } else {
+        eprintln!(
+            "Warning: Cannot determine the type of variant with ref: {} and alt: {}",
+            refr, alt
+        );
+        VarType::Unknown
+    }
+}
+
+fn varclass_matches(varclass: &str, vartype: &VarType) -> bool {
+    match varclass.to_ascii_uppercase().as_str() {
+        "SNV" => matches!(vartype, VarType::Snv | VarType::Unknown),
+        "INDEL" => matches!(vartype, VarType::Ins | VarType::Del | VarType::Unknown),
+        _ => false,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Variant {
+	chrom: String,
+	pos: u64,
+	refr: String,
+	alt: String,
+    vartype: VarType,
+    read_features: LocusFeaturesSNV,
+}
+
+impl Variant {
+    fn base_counts_stats(&self) -> Option<BaseCountsStats> {
+        let ref_char = self.refr.chars().next()?;
+        let alt_char = self.alt.chars().next()?;
+        Some(self.read_features.base_counts.stats(ref_char, alt_char))
+    }
+
+    fn count_locus_features(&mut self, read: &Rc<Record>, base: char, qpos: u64) {
+        if let (Some(refr_char), Some(alt_char)) =
+            (self.refr.chars().next(), self.alt.chars().next())
+        {
+            self.read_features.count(read, base, refr_char, alt_char, qpos);
+        }
+    }
+
+    fn get_pos_fraction(&self, ref_seq_len: u64) -> f64 {
+        self.pos as f64/ ref_seq_len as f64
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct LocusFeaturesSNV {
+    base_counts: BaseCounts,
+    ref_read_features: ReadFeatures,
+    alt_read_features: ReadFeatures,
+    all_read_features: ReadFeatures,
+}
+
+impl LocusFeaturesSNV {
+    fn count(&mut self, read: &Rc<Record>, base: char, refr: char, alt: char, query_pos: u64) {
+        self.base_counts.count(base);
+
+        if base == refr {
+            self.ref_read_features.count(&read, query_pos);
+        } else if base == alt{
+            self.alt_read_features.count(&read, query_pos);
+        }
+        self.all_read_features.count(&read, query_pos);
+    }
+
+    fn normalized_row(&self) -> NormalizedLocusFeaturesRow {
+        let r = self.ref_read_features.normalized();
+        let a = self.alt_read_features.normalized();
+        let all = self.all_read_features.normalized();
+
+        NormalizedLocusFeaturesRow {
+            ref_nm: r.nm,
+            ref_base_qual: r.base_qual,
+            ref_map_qual: r.map_qual,
+            ref_align_len: r.align_len,
+            ref_clipping: r.clipping,
+            ref_indel: r.indel,
+            ref_forward_strand: r.forward_strand,
+            ref_reverse_strand: r.reverse_strand,
+            ref_supplementary: r.supplementary,
+            ref_normalised_read_position: r.normalised_read_position,
+
+            alt_nm: a.nm,
+            alt_base_qual: a.base_qual,
+            alt_map_qual: a.map_qual,
+            alt_align_len: a.align_len,
+            alt_clipping: a.clipping,
+            alt_indel: a.indel,
+            alt_forward_strand: a.forward_strand,
+            alt_reverse_strand: a.reverse_strand,
+            alt_supplementary: a.supplementary,
+            alt_normalised_read_position: a.normalised_read_position,
+
+            all_nm: all.nm,
+            all_base_qual: all.base_qual,
+            all_map_qual: all.map_qual,
+            all_align_len: all.align_len,
+            all_clipping: all.clipping,
+            all_indel: all.indel,
+            all_forward_strand: all.forward_strand,
+            all_reverse_strand: all.reverse_strand,
+            all_supplementary: all.supplementary,
+            all_normalised_read_position: all.normalised_read_position,
+        }
+    }    
 }
 
 #[derive(Debug, Clone, Default)]
@@ -366,56 +268,12 @@ impl BaseCounts {
     }
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize)]
-struct NormalizedLocusFeaturesRow {
-    ref_nm: Option<f64>,
-    ref_base_qual: Option<f64>,
-    ref_map_qual: Option<f64>,
-    ref_align_len: Option<f64>,
-    ref_clipping: Option<f64>,
-    ref_indel: Option<f64>,
-    ref_forward_strand: Option<f64>,
-    ref_reverse_strand: Option<f64>,
-    ref_supplementary: Option<f64>,
-    ref_normalised_read_position: Option<f64>,
-
-    alt_nm: Option<f64>,
-    alt_base_qual: Option<f64>,
-    alt_map_qual: Option<f64>,
-    alt_align_len: Option<f64>,
-    alt_clipping: Option<f64>,
-    alt_indel: Option<f64>,
-    alt_forward_strand: Option<f64>,
-    alt_reverse_strand: Option<f64>,
-    alt_supplementary: Option<f64>,
-    alt_normalised_read_position: Option<f64>,
-
-    all_nm: Option<f64>,
-    all_base_qual: Option<f64>,
-    all_map_qual: Option<f64>,
-    all_align_len: Option<f64>,
-    all_clipping: Option<f64>,
-    all_indel: Option<f64>,
-    all_forward_strand: Option<f64>,
-    all_reverse_strand: Option<f64>,
-    all_supplementary: Option<f64>,
-    all_normalised_read_position: Option<f64>,
-}
-
-// Use option or not? Because in python script if there are no values it defaults to ''
-// Compared to default which would initialize it as 0.0
-#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
-struct NormalizedReadFeatures {
-    nm: Option<f64>,
-    base_qual: Option<f64>,
-    map_qual: Option<f64>,
-    align_len: Option<f64>,
-    clipping: Option<f64>,
-    indel: Option<f64>,
-    forward_strand: Option<f64>,
-    reverse_strand: Option<f64>,
-    supplementary: Option<f64>,
-    normalised_read_position: Option<f64>,
+#[derive(Debug, Clone, Copy, Serialize)]
+struct BaseCountsStats {
+    depth: u32,
+    ref_count: u32,
+    alt_count: u32,
+    alt_vaf: f64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -503,96 +361,56 @@ impl ReadFeatures {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-struct LocusFeaturesSNV {
-    base_counts: BaseCounts,
-    ref_read_features: ReadFeatures,
-    alt_read_features: ReadFeatures,
-    all_read_features: ReadFeatures,
+#[derive(Debug, Clone, Default, serde::Serialize)]
+struct NormalizedLocusFeaturesRow {
+    ref_nm: Option<f64>,
+    ref_base_qual: Option<f64>,
+    ref_map_qual: Option<f64>,
+    ref_align_len: Option<f64>,
+    ref_clipping: Option<f64>,
+    ref_indel: Option<f64>,
+    ref_forward_strand: Option<f64>,
+    ref_reverse_strand: Option<f64>,
+    ref_supplementary: Option<f64>,
+    ref_normalised_read_position: Option<f64>,
+
+    alt_nm: Option<f64>,
+    alt_base_qual: Option<f64>,
+    alt_map_qual: Option<f64>,
+    alt_align_len: Option<f64>,
+    alt_clipping: Option<f64>,
+    alt_indel: Option<f64>,
+    alt_forward_strand: Option<f64>,
+    alt_reverse_strand: Option<f64>,
+    alt_supplementary: Option<f64>,
+    alt_normalised_read_position: Option<f64>,
+
+    all_nm: Option<f64>,
+    all_base_qual: Option<f64>,
+    all_map_qual: Option<f64>,
+    all_align_len: Option<f64>,
+    all_clipping: Option<f64>,
+    all_indel: Option<f64>,
+    all_forward_strand: Option<f64>,
+    all_reverse_strand: Option<f64>,
+    all_supplementary: Option<f64>,
+    all_normalised_read_position: Option<f64>,
 }
 
-impl LocusFeaturesSNV {
-    fn count(&mut self, read: &Rc<Record>, base: char, refr: char, alt: char, query_pos: u64) {
-        self.base_counts.count(base);
-
-        if base == refr {
-            self.ref_read_features.count(&read, query_pos);
-        } else if base == alt{
-            self.alt_read_features.count(&read, query_pos);
-        }
-        self.all_read_features.count(&read, query_pos);
-    }
-
-    fn normalized_row(&self) -> NormalizedLocusFeaturesRow {
-        let r = self.ref_read_features.normalized();
-        let a = self.alt_read_features.normalized();
-        let all = self.all_read_features.normalized();
-
-        NormalizedLocusFeaturesRow {
-            ref_nm: r.nm,
-            ref_base_qual: r.base_qual,
-            ref_map_qual: r.map_qual,
-            ref_align_len: r.align_len,
-            ref_clipping: r.clipping,
-            ref_indel: r.indel,
-            ref_forward_strand: r.forward_strand,
-            ref_reverse_strand: r.reverse_strand,
-            ref_supplementary: r.supplementary,
-            ref_normalised_read_position: r.normalised_read_position,
-
-            alt_nm: a.nm,
-            alt_base_qual: a.base_qual,
-            alt_map_qual: a.map_qual,
-            alt_align_len: a.align_len,
-            alt_clipping: a.clipping,
-            alt_indel: a.indel,
-            alt_forward_strand: a.forward_strand,
-            alt_reverse_strand: a.reverse_strand,
-            alt_supplementary: a.supplementary,
-            alt_normalised_read_position: a.normalised_read_position,
-
-            all_nm: all.nm,
-            all_base_qual: all.base_qual,
-            all_map_qual: all.map_qual,
-            all_align_len: all.align_len,
-            all_clipping: all.clipping,
-            all_indel: all.indel,
-            all_forward_strand: all.forward_strand,
-            all_reverse_strand: all.reverse_strand,
-            all_supplementary: all.supplementary,
-            all_normalised_read_position: all.normalised_read_position,
-        }
-    }    
-}
-
-#[derive(Debug, Clone)]
-struct Variant {
-	chrom: String,
-	pos: u64,
-	refr: String,
-	alt: String,
-    vartype: VarType,
-    read_features: LocusFeaturesSNV,
-}
-
-impl Variant {
-    fn base_counts_stats(&self) -> Option<BaseCountsStats> {
-        let ref_char = self.refr.chars().next()?;
-        let alt_char = self.alt.chars().next()?;
-        Some(self.read_features.base_counts.stats(ref_char, alt_char))
-    }
-
-    fn count_locus_features(&mut self, read: &Rc<Record>, base: char, qpos: u64) {
-        if let (Some(refr_char), Some(alt_char)) =
-            (self.refr.chars().next(), self.alt.chars().next())
-        {
-            self.read_features.count(read, base, refr_char, alt_char, qpos);
-        }
-    }
-
-    fn get_pos_fraction(&self, ref_seq_len: u64) -> f64 {
-        self.pos as f64/ ref_seq_len as f64
-    }
+// Use option or not? Because in python script if there are no values it defaults to ''
+// Compared to default which would initialize it as 0.0
+#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
+struct NormalizedReadFeatures {
+    nm: Option<f64>,
+    base_qual: Option<f64>,
+    map_qual: Option<f64>,
+    align_len: Option<f64>,
+    clipping: Option<f64>,
+    indel: Option<f64>,
+    forward_strand: Option<f64>,
+    reverse_strand: Option<f64>,
+    supplementary: Option<f64>,
+    normalised_read_position: Option<f64>,
 }
 
 fn get_vcf_min_max(variants: &VecDeque<Variant>) -> Option<(String, u64, u64)> {
@@ -605,55 +423,242 @@ fn get_vcf_min_max(variants: &VecDeque<Variant>) -> Option<(String, u64, u64)> {
     Some((chrom, min_pos, max_pos))
 }
 
-#[derive(Debug, Clone, Copy)]
-enum VarType {
-    Snv,
-    Del,
-    Ins,
-    Unknown,
-}
+fn get_ref_len(
+    bam_reader: &IndexedReader,
+    chrom: &str,
+) -> Result<u64, Box<dyn std::error::Error>> {
+    let header = bam_reader.header();
 
-impl VarType {
-    fn as_str(&self) -> &'static str {
-        match self {
-            VarType::Snv => "SNV",
-            VarType::Del => "DEL",
-            VarType::Ins => "INS",
-            VarType::Unknown => "UNKNOWN",            
+    for tid in 0..header.target_count() {
+        let name = std::str::from_utf8(header.tid2name(tid))?;
+        if name == chrom {
+            return header
+                .target_len(tid)
+                .ok_or_else(|| format!("Reference '{}' found, but has no length", chrom).into());
         }
     }
+
+    Err(format!("Could not find reference '{}' in BAM header", chrom).into())
 }
 
-fn get_var_type(refr: &str, alt: & str) -> VarType {
-    if refr.len() == 1 && alt.len() == 1 {
-        VarType::Snv
-    } else if refr.len() > alt.len() {
-        VarType::Del
-    } else if refr.len() < alt.len() {
-        VarType::Ins
-    } else {
-        eprintln!(
-            "Warning: Cannot determine the type of variant with ref: {} and alt: {}",
-            refr, alt
-        );
-        VarType::Unknown
+fn ref_pos_to_query_pos (mut ref_pos: u64, target_pos: u64, read: &Rc<Record>) -> Option<usize> {
+    let mut read_pos = 0usize;
+
+    for cigar in read.cigar().iter() {
+        match *cigar {
+            Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
+                let len = len as u64;
+
+                if target_pos >= ref_pos && target_pos < ref_pos + len {
+                    let offset = (target_pos - ref_pos) as usize;
+                    return Some(read_pos + offset);
+                }
+
+                ref_pos += len;
+                read_pos += len as usize;
+            }
+
+            Cigar::Ins(len) | Cigar::SoftClip(len) => {
+                read_pos += len as usize;
+            }
+
+            Cigar::Del(len) | Cigar::RefSkip(len) => {
+                let len = len as u64;
+
+                if target_pos >= ref_pos && target_pos < ref_pos + len {
+                    return None; // target is in a deletion/refskip
+                }
+
+                ref_pos += len;
+            }
+
+            Cigar::HardClip(_) | Cigar::Pad(_) => {}
+        }
     }
+
+    None
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let vcf_path = "/home/jch/genomic-data/chrM_heavy_stress.vcf";
-    let bam_path = "/home/jch/genomic-data/chrM_heavy_stress.sorted.bam";
-    let varclass = "SNV";
-    let csv_path = "/home/jch/git/rust-varlap/test_data/rust-varlap.output.csv";
-    
-    let mut variants = vcf_reader(&vcf_path, &varclass)?;
+fn process_bam_region(
+    variants: &mut VecDeque<Variant>,
+    bam_path: &str,
+    region_chrom: &str, 
+    min_pos: u64, 
+    max_pos: u64,
+    csv_path: &str,
+    sample: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut bam_reader = IndexedReader::from_path(bam_path)?;
+    bam_reader.fetch((region_chrom, min_pos - 1, max_pos))?;
 
-    let (region_chrom, min_pos, max_pos) = 
-        get_vcf_min_max(&variants).ok_or("Could not determine VCF min/max")?;
+    let mut csv_writer = Writer::from_path(csv_path)?;
 
-    println!("Region Chromosome: {}, Min Pos: {}, Max Pos: {}", &region_chrom, min_pos, max_pos);
+    let ref_seq_len = get_ref_len(&bam_reader, &region_chrom)?;
 
-    process_bam_region(&mut variants, &bam_path, &region_chrom, min_pos, max_pos, &csv_path)?;
+    for read_result in bam_reader.rc_records() {
+        let record = read_result?;
+        let read_start = record.pos() as u64;
+        let seq = record.seq();
 
+        loop {
+            let should_pop = match variants.front() {
+                Some(var) => (read_start + 1) > var.pos,
+                None => false,
+            };
+
+            if should_pop {
+                if let Some(var) = variants.pop_front() {
+                    let pos_fraction = var.get_pos_fraction(ref_seq_len);
+                    write_variant_row(&mut csv_writer, &var, pos_fraction, &sample)?;
+                }
+            } else {
+                break;
+            }
+        }
+
+        for var in &mut *variants {
+            let zero_based_pos = var.pos - 1;
+
+            if let Some(qpos) = ref_pos_to_query_pos(read_start, zero_based_pos, &record) {
+                let base = seq[qpos] as char;
+                var.count_locus_features(&record, base, qpos as u64);
+            } else {
+                break;
+            }
+        }
+    }
+
+    while let Some(var) = variants.pop_front() {
+        let pos_fraction = var.get_pos_fraction(ref_seq_len);
+        write_variant_row(&mut csv_writer, &var, pos_fraction, &sample)?;
+    }
+    csv_writer.flush()?;
+
+    Ok(()) 
+}
+
+fn write_variant_row(
+    writer: &mut Writer<File>,
+    var: &Variant,
+    pos_fraction: f64,
+    sample: &str,
+) -> Result<(), Box<dyn Error>> {
+    writer.serialize(OutputRow::from_variant(var, pos_fraction, sample))?;
     Ok(())
+}
+
+#[derive(serde::Serialize)]
+struct OutputRow<'a> {
+    chrom: &'a str,
+    pos: u64,
+    #[serde(rename = "ref")]
+    refr: &'a str,
+    alt: &'a str,
+    vartype: &'a str,
+    pos_normalised: f64,
+    sample: &'a str,
+    depth: u32,
+
+    count_a: u32,
+    count_t: u32,
+    count_g: u32,
+    count_c: u32,
+    count_n: u32,
+
+    ref_count: u32,
+    alt_count: u32,
+    alt_vaf: f64,
+
+    ref_nm: Option<f64>,
+    ref_base_qual: Option<f64>,
+    ref_map_qual: Option<f64>,
+    ref_align_len: Option<f64>,
+    ref_clipping: Option<f64>,
+    ref_indel: Option<f64>,
+    ref_forward_strand: Option<f64>,
+    ref_reverse_strand: Option<f64>,
+    ref_supplementary: Option<f64>,
+    ref_normalised_read_position: Option<f64>,
+
+    alt_nm: Option<f64>,
+    alt_base_qual: Option<f64>,
+    alt_map_qual: Option<f64>,
+    alt_align_len: Option<f64>,
+    alt_clipping: Option<f64>,
+    alt_indel: Option<f64>,
+    alt_forward_strand: Option<f64>,
+    alt_reverse_strand: Option<f64>,
+    alt_supplementary: Option<f64>,
+    alt_normalised_read_position: Option<f64>,
+
+    all_nm: Option<f64>,
+    all_base_qual: Option<f64>,
+    all_map_qual: Option<f64>,
+    all_align_len: Option<f64>,
+    all_clipping: Option<f64>,
+    all_indel: Option<f64>,
+    all_forward_strand: Option<f64>,
+    all_reverse_strand: Option<f64>,
+    all_supplementary: Option<f64>,
+    all_normalised_read_position: Option<f64>,
+}
+
+impl<'a> OutputRow<'a> {
+    fn from_variant(var: &'a Variant, pos_fraction: f64, sample: &'a str) -> Self {
+        let bcs = var.base_counts_stats().expect("Could not get base count statistics.");
+        let rf = var.read_features.normalized_row();
+        Self {
+            chrom: &var.chrom,
+            pos: var.pos,
+            refr: &var.refr,
+            alt: &var.alt,
+            vartype: &var.vartype.as_str(),
+            pos_normalised: pos_fraction,
+            sample: &sample,
+            depth: bcs.depth,
+
+            count_a: var.read_features.base_counts.a,
+            count_t: var.read_features.base_counts.t,
+            count_g: var.read_features.base_counts.g,
+            count_c: var.read_features.base_counts.c,
+            count_n: var.read_features.base_counts.n,
+
+            ref_count: bcs.ref_count,
+            alt_count: bcs.alt_count,
+            alt_vaf: bcs.alt_vaf,
+
+            ref_nm: rf.ref_nm,
+            ref_base_qual: rf.ref_base_qual,
+            ref_map_qual: rf.ref_map_qual,
+            ref_align_len: rf.ref_align_len,
+            ref_clipping: rf.ref_clipping,
+            ref_indel: rf.ref_indel,
+            ref_forward_strand: rf.ref_forward_strand,
+            ref_reverse_strand: rf.ref_reverse_strand,
+            ref_supplementary: rf.ref_supplementary,
+            ref_normalised_read_position: rf.ref_normalised_read_position,
+
+            alt_nm: rf.alt_nm,
+            alt_base_qual: rf.alt_base_qual,
+            alt_map_qual: rf.alt_map_qual,
+            alt_align_len: rf.alt_align_len,
+            alt_clipping: rf.alt_clipping,
+            alt_indel: rf.alt_indel,
+            alt_forward_strand: rf.alt_forward_strand,
+            alt_reverse_strand: rf.alt_reverse_strand,
+            alt_supplementary: rf.alt_supplementary,
+            alt_normalised_read_position: rf.alt_normalised_read_position,
+
+            all_nm: rf.all_nm,
+            all_base_qual: rf.all_base_qual,
+            all_map_qual: rf.all_map_qual,
+            all_align_len: rf.all_align_len,
+            all_clipping: rf.all_clipping,
+            all_indel: rf.all_indel,
+            all_forward_strand: rf.all_forward_strand,
+            all_reverse_strand: rf.all_reverse_strand,
+            all_supplementary: rf.all_supplementary,
+            all_normalised_read_position: rf.all_normalised_read_position,
+        }
+    }
 }
