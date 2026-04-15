@@ -298,7 +298,7 @@ impl ReadFeatures {
         query_pos: u64,
     ) {
         self.num_reads += 1;
-        let query_len = self.query_alignment_length(&read) as usize;
+        let query_len = read.seq_len() as usize;
         if query_len > 0 {
             self.normalised_read_position += query_pos as f64 / query_len as f64;
         }
@@ -306,7 +306,7 @@ impl ReadFeatures {
         let pos_qual = read.qual()[query_pos as usize];
         self.base_qual += pos_qual as u32;
 
-        self.align_len += query_len as u32;
+        self.align_len += self.query_alignment_length(&read) as u32;
         self.map_qual += read.mapq() as u32;
 
         for c in read.cigar().iter() {
