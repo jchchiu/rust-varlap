@@ -27,6 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+// Change to bcf::Reader? so can handle gzip files?
 fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<dyn Error>> {
     let file = File::open(file_path)?;
     let reader = BufReader::new(file);
@@ -317,7 +318,7 @@ impl ReadFeatures {
             }
         }
 
-        self.align_len += query_alignment_length(&read) as u32;
+        self.align_len += self.query_alignment_length(&read) as u32;
         self.map_qual += read.mapq() as u32;
 
         for c in read.cigar().iter() {
@@ -351,6 +352,17 @@ impl ReadFeatures {
 
     }
 
+    fn query_alignment_length(&self, record: &Rc<Record>) -> u32 {
+        let mut len = 0;
+        for c in record.cigar().iter() {
+            match *c {
+                Cigar::Match(l) | Cigar::Equal(l) | Cigar::Diff(l) | Cigar::Ins(l) => len += l,
+                _ => {}
+            }
+        }
+        len
+    }
+
     fn normalized(&self) -> NormalizedReadFeatures {
         if self.num_reads > 0 {
             let n = self.num_reads as f64;
@@ -370,20 +382,6 @@ impl ReadFeatures {
             NormalizedReadFeatures::default()
         }
     }
-}
-
-fn query_alignment_length(record: &Rc<Record>) -> u32 {
-    record
-        .cigar()
-        .iter()
-        .map(|c| match *c {
-            Cigar::Match(len) => len,
-            Cigar::Equal(len) => len,
-            Cigar::Diff(len) => len,
-            Cigar::Ins(len) => len,
-            _ => 0,
-        })
-        .sum()
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -467,56 +465,8 @@ fn get_ref_len(
 }
 
 fn ref_pos_to_query_pos (read: &Rc<Record>, target_pos: u64) -> Option<u32> {
-    // let mut ref_pos = read.pos() as u64;
-    // let mut read_position = 0usize;
-
     let cigar = read.cigar();
-
     Some(cigar.read_pos(target_pos as u32, false, false).ok()?)?
-
-    // let cigar_soft = cigar.read_pos(target_pos as u32, true, false).ok()?;
-    // let cigar_dels = cigar.read_pos(target_pos as u32, false, true).ok()?;
-    // let cigar_both = cigar.read_pos(target_pos as u32, true, true).ok()?;
-    // let cigar_none = cigar.read_pos(target_pos as u32, false, false).ok()?;
-
-    // for cigar in read.cigar().iter() {
-    //     match *cigar {
-    //         Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
-    //             let len = len as u64;
-
-    //             if target_pos >= ref_pos && target_pos < ref_pos + len {
-    //                 let offset = (target_pos - ref_pos) as usize;
-    //                 if target_pos == 15340 {
-    //                     println!("Variant position: {}", target_pos);
-    //                     println!("Cigar soft: {:?}, Cigar dels: {:?}, Cigar both: {:?}, Cigar none: {:?}", cigar_soft, cigar_dels, cigar_both, cigar_none);
-    //                     println!("Caculated Cigar: {:?}", Some(read_position + offset));
-    //                 }
-    //                 return Some(read_position + offset);
-    //             }
-
-    //             ref_pos += len;
-    //             read_position += len as usize;
-    //         }
-
-    //         Cigar::Ins(len) | Cigar::SoftClip(len) => {
-    //             read_position += len as usize;
-    //         }
-
-    //         Cigar::Del(len) | Cigar::RefSkip(len) => {
-    //             let len = len as u64;
-
-    //             if target_pos >= ref_pos && target_pos < ref_pos + len {
-    //                 return None; // target is in a deletion/refskip
-    //             }
-
-    //             ref_pos += len;
-    //         }
-
-    //         Cigar::HardClip(_) | Cigar::Pad(_) => {}
-    //     }
-    // }
-
-    // None
 }
 
 fn skip_read_check(read: &Rc<Record>) -> bool {
@@ -525,7 +475,7 @@ fn skip_read_check(read: &Rc<Record>) -> bool {
         return true;
     }
 
-    // stepper='samtools' equivalents
+    // Settings equivalent to stepper='samtools'? Find reference
     if read.is_unmapped() 
         || read.is_secondary() 
         || read.is_quality_check_failed() 
@@ -548,18 +498,6 @@ fn process_bam_region(
     let mut bam_reader = IndexedReader::from_path(bam_path)?;
     bam_reader.fetch((region_chrom, min_pos - 1, max_pos))?;
 
-    let mut bam_reader_debug = IndexedReader::from_path(bam_path)?;
-    bam_reader_debug.fetch((region_chrom, 4820, 4821))?;
-
-    for pileup in bam_reader_debug.pileup() {
-        let pileup = pileup?;
-        
-        if pileup.pos() == 4820 {
-            println!("Position: {}:{}", pileup.tid(), pileup.pos());
-            println!("Depth: {}", pileup.depth());
-        }
-    }
-
     let mut csv_writer = Writer::from_path(csv_path)?;
 
     let ref_seq_len = get_ref_len(&bam_reader, &region_chrom)?;
@@ -568,7 +506,7 @@ fn process_bam_region(
         let record = read_result?;
         
         if skip_read_check(&record) {
-            continue
+            continue;
         }
 
         let read_start = record.pos() as u64;
@@ -592,19 +530,19 @@ fn process_bam_region(
 
         for var in &mut *variants {
             let zero_based_pos = var.pos - 1;
-
-            let qpos = ref_pos_to_query_pos(&record, zero_based_pos);
-            let base: Option<u8> = qpos.and_then(|pos| {
-                let i = pos as usize;
-                if i < seq.len() {
-                    Some(seq[i])
-                } else {
-                    None
-                }
-            });
             let read_end = record.cigar().end_pos() as u64;
 
             if zero_based_pos >= read_start && zero_based_pos < read_end {
+                // Can probably move this into count_locus_features
+                let qpos = ref_pos_to_query_pos(&record, zero_based_pos);
+                let base: Option<u8> = qpos.and_then(|pos| {
+                    let i = pos as usize;
+                    if i < seq.len() {
+                        Some(seq[i])
+                    } else {
+                        None
+                    }
+                });
                 var.count_locus_features(&record, base, qpos);
             } else {
                 break;
