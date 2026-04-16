@@ -519,6 +519,15 @@ fn ref_pos_to_query_pos (read: &Rc<Record>, target_pos: u64) -> Option<u32> {
     // None
 }
 
+fn skip_read_check(read: &Rc<Record>) -> bool {
+    // Check if read is orphan pair as this is skipped in the origial varlap pileup call (ignore_orphans=True)
+    if read.is_paired() && !read.is_proper_pair() {
+        true
+    } else {
+        false
+    }
+}
+
 fn process_bam_region(
     variants: &mut VecDeque<Variant>,
     bam_path: &str,
@@ -549,6 +558,11 @@ fn process_bam_region(
 
     for read_result in bam_reader.rc_records() {
         let record = read_result?;
+        
+        if skip_read_check(&record) {
+            continue
+        }
+
         let read_start = record.pos() as u64;
         let seq = record.seq();
 
