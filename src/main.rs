@@ -522,10 +522,18 @@ fn ref_pos_to_query_pos (read: &Rc<Record>, target_pos: u64) -> Option<u32> {
 fn skip_read_check(read: &Rc<Record>) -> bool {
     // Check if read is orphan pair as this is skipped in the origial varlap pileup call (ignore_orphans=True)
     if read.is_paired() && !read.is_proper_pair() {
-        true
-    } else {
-        false
+        return true;
     }
+
+    // stepper='samtools' equivalents
+    if read.is_unmapped() 
+        || read.is_secondary() 
+        || read.is_quality_check_failed() 
+        || read.is_duplicate() {
+        return true;
+    }
+
+    false
 }
 
 fn process_bam_region(
@@ -594,12 +602,12 @@ fn process_bam_region(
                     None
                 }
             });
-            let read_end = read_start + query_alignment_length(&record) as u64;
+            let read_end = record.cigar().end_pos() as u64;
 
             if zero_based_pos >= read_start && zero_based_pos < read_end {
                 var.count_locus_features(&record, base, qpos);
             } else {
-                break
+                break;
             }
         }
     }
