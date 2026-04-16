@@ -9,10 +9,10 @@ use rust_htslib::bam::{Read, IndexedReader, Record};
 use rust_htslib::bam::record::{Aux, Cigar};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let vcf_path = "/home/jch/genomic-data/chrM_heavy_stress.vcf";
-    let bam_path = "/home/jch/genomic-data/chrM_heavy_stress.sorted.bam";
+    let vcf_path = "test_data/chrM_heavy_stress.vcf";
+    let bam_path = "test_data/chrM_heavy_stress.sorted.bam";
     let varclass = "SNV";
-    let csv_path = "/home/jch/git/rust-varlap/test_data/rust-varlap.output.csv";
+    let csv_path = "test_data/rust-varlap.output.csv";
     let sample = "";
     
     let mut variants = vcf_reader(&vcf_path, &varclass)?;
@@ -138,7 +138,7 @@ impl Variant {
         Some(self.read_features.base_counts.stats(ref_char, alt_char))
     }
 
-    fn count_locus_features(&mut self, read: &Rc<Record>, base: char, qpos: u64) {
+    fn count_locus_features(&mut self, read: &Rc<Record>, base: Option<u8>, qpos: Option<u32>) {
         if let (Some(refr_char), Some(alt_char)) =
             (self.refr.chars().next(), self.alt.chars().next())
         {
@@ -160,14 +160,19 @@ struct LocusFeaturesSNV {
 }
 
 impl LocusFeaturesSNV {
-    fn count(&mut self, read: &Rc<Record>, base: char, refr: char, alt: char, query_pos: u64) {
-        self.base_counts.count(base);
+    fn count(&mut self, read: &Rc<Record>, base: Option<u8>, refr: char, alt: char, query_pos: Option<u32>) {
+        if let Some(base_u8) = base {
+            let base_char = base_u8 as char;
 
-        if base == refr {
-            self.ref_read_features.count(&read, query_pos);
-        } else if base == alt{
-            self.alt_read_features.count(&read, query_pos);
+            self.base_counts.count(base_char);
+
+            if base_char == refr {
+                self.ref_read_features.count(read, query_pos);
+            } else if base_char == alt {
+                self.alt_read_features.count(read, query_pos);
+            }
         }
+
         self.all_read_features.count(&read, query_pos);
     }
 
@@ -295,18 +300,24 @@ impl ReadFeatures {
     fn count(
         &mut self,
         read: &Rc<Record>,
-        query_pos: u64,
+        query_pos: Option<u32>,
     ) {
         self.num_reads += 1;
         let query_len = read.seq_len() as usize;
-        if query_len > 0 {
-            self.normalised_read_position += query_pos as f64 / query_len as f64;
-        }
-        // Can maybe to Some(pos_qual) = read.qual().get() if want to return an Option for safety
-        let pos_qual = read.qual()[query_pos as usize];
-        self.base_qual += pos_qual as u32;
 
-        self.align_len += self.query_alignment_length(&read) as u32;
+        if let Some(qpos) = query_pos {
+            if query_len > 0 {
+                self.normalised_read_position += qpos as f64 / query_len as f64;
+            }
+
+            let qpos_usize = qpos as usize;
+            if qpos_usize < read.qual().len() {
+                let pos_qual = read.qual()[qpos_usize];
+                self.base_qual += pos_qual as u32;
+            }
+        }
+
+        self.align_len += query_alignment_length(&read) as u32;
         self.map_qual += read.mapq() as u32;
 
         for c in read.cigar().iter() {
@@ -340,20 +351,6 @@ impl ReadFeatures {
 
     }
 
-    fn query_alignment_length(&self, record: &Rc<Record>) -> u32 {
-        record
-            .cigar()
-            .iter()
-            .map(|c| match *c {
-                Cigar::Match(len) => len,
-                Cigar::Equal(len) => len,
-                Cigar::Diff(len) => len,
-                Cigar::Ins(len) => len,
-                _ => 0,
-            })
-            .sum()
-    }
-
     fn normalized(&self) -> NormalizedReadFeatures {
         if self.num_reads > 0 {
             let n = self.num_reads as f64;
@@ -373,6 +370,20 @@ impl ReadFeatures {
             NormalizedReadFeatures::default()
         }
     }
+}
+
+fn query_alignment_length(record: &Rc<Record>) -> u32 {
+    record
+        .cigar()
+        .iter()
+        .map(|c| match *c {
+            Cigar::Match(len) => len,
+            Cigar::Equal(len) => len,
+            Cigar::Diff(len) => len,
+            Cigar::Ins(len) => len,
+            _ => 0,
+        })
+        .sum()
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -461,7 +472,7 @@ fn ref_pos_to_query_pos (read: &Rc<Record>, target_pos: u64) -> Option<u32> {
 
     let cigar = read.cigar();
 
-    cigar.read_pos(target_pos as u32, false, false).ok()?
+    Some(cigar.read_pos(target_pos as u32, false, false).ok()?)?
 
     // let cigar_soft = cigar.read_pos(target_pos as u32, true, false).ok()?;
     // let cigar_dels = cigar.read_pos(target_pos as u32, false, true).ok()?;
@@ -520,6 +531,18 @@ fn process_bam_region(
     let mut bam_reader = IndexedReader::from_path(bam_path)?;
     bam_reader.fetch((region_chrom, min_pos - 1, max_pos))?;
 
+    let mut bam_reader_debug = IndexedReader::from_path(bam_path)?;
+    bam_reader_debug.fetch((region_chrom, 4820, 4821))?;
+
+    for pileup in bam_reader_debug.pileup() {
+        let pileup = pileup?;
+        
+        if pileup.pos() == 4820 {
+            println!("Position: {}:{}", pileup.tid(), pileup.pos());
+            println!("Depth: {}", pileup.depth());
+        }
+    }
+
     let mut csv_writer = Writer::from_path(csv_path)?;
 
     let ref_seq_len = get_ref_len(&bam_reader, &region_chrom)?;
@@ -548,11 +571,21 @@ fn process_bam_region(
         for var in &mut *variants {
             let zero_based_pos = var.pos - 1;
 
-            if let Some(qpos) = ref_pos_to_query_pos(&record, zero_based_pos) {
-                let base = seq[qpos as usize] as char;
-                var.count_locus_features(&record, base, qpos as u64);
+            let qpos = ref_pos_to_query_pos(&record, zero_based_pos);
+            let base: Option<u8> = qpos.and_then(|pos| {
+                let i = pos as usize;
+                if i < seq.len() {
+                    Some(seq[i])
+                } else {
+                    None
+                }
+            });
+            let read_end = read_start + query_alignment_length(&record) as u64;
+
+            if zero_based_pos >= read_start && zero_based_pos < read_end {
+                var.count_locus_features(&record, base, qpos);
             } else {
-                continue;
+                break
             }
         }
     }
