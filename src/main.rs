@@ -114,10 +114,11 @@ fn get_var_type(refr: &str, alt: & str) -> VarType {
     }
 }
 
+// What to do with unknown VarType?
 fn varclass_matches(varclass: &str, vartype: &VarType) -> bool {
     match varclass.to_ascii_uppercase().as_str() {
-        "SNV" => matches!(vartype, VarType::Snv | VarType::Unknown),
-        "INDEL" => matches!(vartype, VarType::Ins | VarType::Del | VarType::Unknown),
+        "SNV" => matches!(vartype, VarType::Snv),
+        "INDEL" => matches!(vartype, VarType::Ins | VarType::Del),
         _ => false,
     }
 }
@@ -464,7 +465,7 @@ fn get_ref_len(
     Err(format!("Could not find reference '{}' in BAM header", chrom).into())
 }
 
-fn ref_pos_to_query_pos (read: &Rc<Record>, target_pos: u64) -> Option<u32> {
+fn ref_pos_to_query_pos (read: &Record, target_pos: u64) -> Option<u32> {
     let cigar = read.cigar();
     Some(cigar.read_pos(target_pos as u32, false, false).ok()?)?
 }
@@ -475,7 +476,8 @@ fn skip_read_check(read: &Rc<Record>) -> bool {
         return true;
     }
 
-    // Settings equivalent to stepper='samtools'? Find reference
+    // Settings equivalent to stepper='samtools'? 
+    // See -ff at https://www.htslib.org/doc/samtools-mpileup.html#DESCRIPTION
     if read.is_unmapped() 
         || read.is_secondary() 
         || read.is_quality_check_failed() 
