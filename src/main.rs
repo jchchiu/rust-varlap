@@ -58,18 +58,33 @@ fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<
             for alt in fields[4].split(',') {
                 let vartype = get_var_type(&refr, alt);
 
-                if !varclass_matches(varclass, &vartype) {
-                    continue;
+                match varclass.to_ascii_uppercase().as_str() {
+                    "SNV" => {
+                        if matches!(vartype, VarType::Snv) {
+                            variants.push_back(Variant {
+                                chrom: chrom.clone(),
+                                pos,
+                                refr: refr.clone(),
+                                alt: alt.to_string(),
+                                vartype,
+                                features: LocusFeatures::Snv(LocusFeaturesSNV::default()),
+                            });
+                        }
+                    }
+                    "INDEL" => {
+                        if matches!(vartype, VarType::Ins | VarType::Del) {
+                            variants.push_back(Variant {
+                                chrom: chrom.clone(),
+                                pos,
+                                refr: refr.clone(),
+                                alt: alt.to_string(),
+                                vartype,
+                                features: LocusFeatures::Indel(LocusFeaturesINDEL::default()),
+                            });
+                        }
+                    }
+                    _ => continue,
                 }
-
-                variants.push_back(Variant {
-                    chrom: chrom.clone(),
-                    pos,
-                    refr: refr.clone(), 
-                    alt: alt.to_string(),
-                    vartype,
-                    read_features: LocusFeaturesSNV::default(),
-                });
             }
         } else {
             eprintln!("Warning: Skipping input row: {}", line);
@@ -114,15 +129,6 @@ fn get_var_type(refr: &str, alt: & str) -> VarType {
     }
 }
 
-// What to do with unknown VarType?
-fn varclass_matches(varclass: &str, vartype: &VarType) -> bool {
-    match varclass.to_ascii_uppercase().as_str() {
-        "SNV" => matches!(vartype, VarType::Snv),
-        "INDEL" => matches!(vartype, VarType::Ins | VarType::Del),
-        _ => false,
-    }
-}
-
 #[derive(Debug, Clone)]
 struct Variant {
 	chrom: String,
@@ -130,22 +136,40 @@ struct Variant {
 	refr: String,
 	alt: String,
     vartype: VarType,
-    read_features: LocusFeaturesSNV,
+    features: LocusFeatures,
 }
 
 impl Variant {
-    fn base_counts_stats(&self) -> Option<BaseCountsStats> {
+    fn base_counts_stats(&self) -> Option<BaseCountsSNVStats> {
         let ref_char = self.refr.chars().next()?;
         let alt_char = self.alt.chars().next()?;
-        Some(self.read_features.base_counts.stats(ref_char, alt_char))
+
+        match &self.features {
+            LocusFeatures::Snv(f) => Some(f.base_counts.stats(ref_char, alt_char)),
+            LocusFeatures::Indel(_) => None,
+        }
     }
 
     fn count_locus_features(&mut self, read: &Rc<Record>, base: Option<u8>, qpos: Option<u32>) {
-        if let (Some(refr_char), Some(alt_char)) =
-            (self.refr.chars().next(), self.alt.chars().next())
-        {
-            self.read_features.count(read, base, refr_char, alt_char, qpos);
+        match &mut self.features {
+            LocusFeatures::Snv(f) => {
+                if let (Some(refr_char), Some(alt_char)) =
+                    (self.refr.chars().next(), self.alt.chars().next())
+                {
+                    f.count(read, base, refr_char, alt_char, qpos);
+                }
+            }
+            LocusFeatures::Indel(f) => {
+                // Placeholder logic: you will need your own criterion
+                // for whether this read supports alt or ref for an indel.
+                let is_alt_support = false;
+                f.count(read, is_alt_support, qpos);
+            }
         }
+    }
+
+    fn normalized_row(&self) -> NormalizedLocusFeaturesRow {
+        self.features.normalized_row()
     }
 
     fn get_pos_fraction(&self, ref_seq_len: u64) -> f64 {
@@ -153,31 +177,30 @@ impl Variant {
     }
 }
 
+// enum LocusFeatures and match?
+#[derive(Debug, Clone)]
+enum LocusFeatures {
+    Snv(LocusFeaturesSNV),
+    Indel(LocusFeaturesINDEL),
+}
+
+impl LocusFeatures {
+    fn normalized_row(&self) -> NormalizedLocusFeaturesRow {
+        match self {
+            LocusFeatures::Snv(f) => f.common.normalized_row(),
+            LocusFeatures::Indel(f) => f.common.normalized_row(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
-struct LocusFeaturesSNV {
-    base_counts: BaseCounts,
+struct CommonLocusFeatures {
     ref_read_features: ReadFeatures,
     alt_read_features: ReadFeatures,
     all_read_features: ReadFeatures,
 }
 
-impl LocusFeaturesSNV {
-    fn count(&mut self, read: &Rc<Record>, base: Option<u8>, refr: char, alt: char, query_pos: Option<u32>) {
-        if let Some(base_u8) = base {
-            let base_char = base_u8 as char;
-
-            self.base_counts.count(base_char);
-
-            if base_char == refr {
-                self.ref_read_features.count(read, query_pos);
-            } else if base_char == alt {
-                self.alt_read_features.count(read, query_pos);
-            }
-        }
-
-        self.all_read_features.count(&read, query_pos);
-    }
-
+impl CommonLocusFeatures {
     fn normalized_row(&self) -> NormalizedLocusFeaturesRow {
         let r = self.ref_read_features.normalized();
         let a = self.alt_read_features.normalized();
@@ -221,7 +244,56 @@ impl LocusFeaturesSNV {
 }
 
 #[derive(Debug, Clone, Default)]
-struct BaseCounts {
+struct LocusFeaturesSNV {
+    base_counts: BaseCountsSNV,
+    common: CommonLocusFeatures,
+}
+
+impl LocusFeaturesSNV {
+    fn count(&mut self, read: &Rc<Record>, base: Option<u8>, refr: char, alt: char, query_pos: Option<u32>) {
+        if let Some(base_u8) = base {
+            let base_char = base_u8 as char;
+
+            self.base_counts.count(base_char);
+
+            if base_char == refr {
+                self.common.ref_read_features.count(read, query_pos);
+            } else if base_char == alt {
+                self.common.alt_read_features.count(read, query_pos);
+            }
+        }
+
+        self.common.all_read_features.count(&read, query_pos);
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct LocusFeaturesINDEL {
+    common: CommonLocusFeatures,
+}
+
+impl LocusFeaturesINDEL {
+    fn count(&mut self, read: &Rc<Record>, base: Option<u8>, refr: str, alt: str, query_pos: Option<u32>) {
+        
+        if base_char == refr {
+            self.common.ref_read_features.count(read, query_pos);
+        } else if base_char == alt {
+            self.common.alt_read_features.count(read, query_pos);
+        }
+
+        self.common.all_read_features.count(&read, query_pos);
+    }
+
+    fn get_indel_start_coord(pos: Option<u32>, ref, alt) {
+        len_ref = len(ref)
+        len_alt = len(alt)
+        shortest_len = min(len_ref, len_alt)
+        return pos + shortest_len
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct BaseCountsSNV {
     a: u32,
     c: u32,
     g: u32,
@@ -229,7 +301,7 @@ struct BaseCounts {
     n: u32,
 }
 
-impl BaseCounts {
+impl BaseCountsSNV {
     fn count(&mut self, base: char) {
         match base {
             'A' => self.a += 1,
@@ -256,7 +328,7 @@ impl BaseCounts {
         self.a + self.c + self.g + self.t + self.n
     }
 
-    fn stats(&self, refr: char, alt: char) -> BaseCountsStats {
+    fn stats(&self, refr: char, alt: char) -> BaseCountsSNVStats {
         let depth = self.depth();
         let ref_count = self.count_for_base(refr);
         let alt_count = self.count_for_base(alt);
@@ -266,7 +338,7 @@ impl BaseCounts {
             0.0
         };
 
-        BaseCountsStats {
+        BaseCountsSNVStats {
             depth,
             ref_count,
             alt_count,
@@ -276,7 +348,7 @@ impl BaseCounts {
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
-struct BaseCountsStats {
+struct BaseCountsSNVStats {
     depth: u32,
     ref_count: u32,
     alt_count: u32,
@@ -304,6 +376,7 @@ impl ReadFeatures {
         read: &Rc<Record>,
         query_pos: Option<u32>,
     ) {
+        // Instead of counting num of reads, can create a function that sums foward and reverse strand?
         self.num_reads += 1;
         let query_len = read.seq_len() as usize;
 
@@ -627,10 +700,11 @@ struct OutputRow<'a> {
     all_normalised_read_position: Option<f64>,
 }
 
+// Make branching for snv/indel; make common function for read_features
 impl<'a> OutputRow<'a> {
     fn from_variant(var: &'a Variant, pos_fraction: f64, sample: &'a str) -> Self {
         let bcs = var.base_counts_stats().expect("Could not get base count statistics.");
-        let rf = var.read_features.normalized_row();
+        let rf = var.normalized_row();
         Self {
             chrom: &var.chrom,
             pos: var.pos,
@@ -641,11 +715,11 @@ impl<'a> OutputRow<'a> {
             sample: &sample,
             depth: bcs.depth,
 
-            count_a: var.read_features.base_counts.a,
-            count_t: var.read_features.base_counts.t,
-            count_g: var.read_features.base_counts.g,
-            count_c: var.read_features.base_counts.c,
-            count_n: var.read_features.base_counts.n,
+            count_a: var.features.base_counts.a,
+            count_t: var.base_counts.t,
+            count_g: var.base_counts.g,
+            count_c: var.base_counts.c,
+            count_n: var.base_counts.n,
 
             ref_count: bcs.ref_count,
             alt_count: bcs.alt_count,
