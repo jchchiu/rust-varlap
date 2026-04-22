@@ -10,7 +10,7 @@ use rust_htslib::bam::record::{Aux, Cigar};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let vcf_path = "test_data/chrM_heavy_stress.vcf";
-    let bam_path = "test_data/chrM_heavy_stress.sorted.bam";
+    let bam_path: &str = "test_data/chrM_heavy_stress.sorted.bam";
     let varclass = "SNV";
     let csv_path = "test_data/rust-varlap.output.csv";
     let sample = "";
@@ -93,6 +93,8 @@ fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<
 			
 	Ok(variants)
 }
+
+fn is_acceptable_variant(row: Vec<&str>, varclass: &str, )
 
 #[derive(Debug, Clone, Copy)]
 enum VarType {
