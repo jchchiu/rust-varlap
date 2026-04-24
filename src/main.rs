@@ -151,6 +151,13 @@ impl Variant {
         }
     }
 
+    fn indel_stats(&self) -> Option<INDELCountsStats> {
+        match &self.features {
+            LocusFeatures::Snv(_) => None,
+            LocusFeatures::Indel(f) => Some(f.stats()),
+        }
+    }
+
     fn count_locus_features(&mut self, read: &Rc<Record>, ref_pos: u64) {
         let qpos = self.ref_pos_to_query_pos(read, ref_pos);
 
@@ -466,6 +473,39 @@ impl LocusFeaturesINDEL {
 
 }
 
+impl LocusFeaturesINDEL {
+    fn stats(&self) -> INDELCountsStats {
+        let depth = self.common.all_read_features.num_reads;
+        let ref_count = self.common.ref_read_features.num_reads;
+        let alt_count = self.common.alt_read_features.num_reads;
+        let other_count = depth - ref_count - alt_count;
+        let alt_vaf = if depth > 0 {
+            alt_count as f64 / depth as f64
+        } else {
+            0.0
+        };
+
+        INDELCountsStats {
+            depth,
+            ref_count,
+            alt_count,
+            other_count,
+            alt_vaf,
+            overlapping_indels_count: self.overlapping_indels_count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+struct INDELCountsStats {
+    depth: u32,
+    ref_count: u32,
+    alt_count: u32,
+    other_count: u32,
+    alt_vaf: f64,
+    overlapping_indels_count: u64,
+}
+
 #[derive(Debug, Clone, Default)]
 struct BaseCountsSNV {
     a: u32,
@@ -498,12 +538,12 @@ impl BaseCountsSNV {
         }
     }
 
-    fn depth(&self) -> u32 {
-        self.a + self.c + self.g + self.t + self.n
-    }
+    // fn depth(&self) -> u32 {
+    //     self.a + self.c + self.g + self.t + self.n
+    // }
 
     fn stats(&self, refr: char, alt: char) -> BaseCountsSNVStats {
-        let depth = self.depth();
+        let depth = self.a + self.c + self.g + self.t + self.n;
         let ref_count = self.count_for_base(refr);
         let alt_count = self.count_for_base(alt);
         let alt_vaf = if depth > 0 {
@@ -792,6 +832,8 @@ fn process_bam_region(
     Ok(()) 
 }
 
+// NOTE: SERDE NO LONGER WRITING HEADER BECAUSE OF NESTED: THINK OF FIX
+
 fn write_variant_row(
     writer: &mut Writer<File>,
     var: &Variant,
@@ -803,27 +845,7 @@ fn write_variant_row(
 }
 
 #[derive(serde::Serialize)]
-struct OutputRow<'a> {
-    chrom: &'a str,
-    pos: u64,
-    #[serde(rename = "ref")]
-    refr: &'a str,
-    alt: &'a str,
-    vartype: &'a str,
-    pos_normalised: f64,
-    sample: &'a str,
-    depth: u32,
-
-    count_a: u32,
-    count_t: u32,
-    count_g: u32,
-    count_c: u32,
-    count_n: u32,
-
-    ref_count: u32,
-    alt_count: u32,
-    alt_vaf: f64,
-
+struct OutputReadFeatures {
     ref_nm: Option<f64>,
     ref_base_qual: Option<f64>,
     ref_map_qual: Option<f64>,
@@ -858,31 +880,9 @@ struct OutputRow<'a> {
     all_normalised_read_position: Option<f64>,
 }
 
-// Make branching for snv/indel; make common function for read_features
-impl<'a> OutputRow<'a> {
-    fn from_variant(var: &'a Variant, pos_fraction: f64, sample: &'a str) -> Self {
-        let bcs = var.base_counts_stats().expect("Could not get base count statistics.");
-        let rf = var.normalized_row();
+impl From<NormalizedLocusFeaturesRow> for OutputReadFeatures {
+    fn from(rf: NormalizedLocusFeaturesRow) -> Self {
         Self {
-            chrom: &var.chrom,
-            pos: var.pos,
-            refr: &var.refr,
-            alt: &var.alt,
-            vartype: &var.vartype.as_str(),
-            pos_normalised: pos_fraction,
-            sample: &sample,
-            depth: bcs.depth,
-
-            count_a: var.features.base_counts.a,
-            count_t: var.base_counts.t,
-            count_g: var.base_counts.g,
-            count_c: var.base_counts.c,
-            count_n: var.base_counts.n,
-
-            ref_count: bcs.ref_count,
-            alt_count: bcs.alt_count,
-            alt_vaf: bcs.alt_vaf,
-
             ref_nm: rf.ref_nm,
             ref_base_qual: rf.ref_base_qual,
             ref_map_qual: rf.ref_map_qual,
@@ -915,6 +915,131 @@ impl<'a> OutputRow<'a> {
             all_reverse_strand: rf.all_reverse_strand,
             all_supplementary: rf.all_supplementary,
             all_normalised_read_position: rf.all_normalised_read_position,
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+enum OutputRow<'a> {
+    Snv(OutputRowSNV<'a>),
+    Indel(OutputRowINDEL<'a>),
+}
+
+impl<'a> OutputRow<'a> {
+    fn from_variant(var: &'a Variant, pos_fraction: f64, sample: &'a str) -> Self {
+        match &var.features {
+            LocusFeatures::Snv(_) => OutputRow::Snv(OutputRowSNV::from_variant(var, pos_fraction, sample)),
+            LocusFeatures::Indel(_) => OutputRow::Indel(OutputRowINDEL::from_variant(var, pos_fraction, sample)),
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+struct OutputRowSNV<'a> {
+    chrom: &'a str,
+    pos: u64,
+    #[serde(rename = "ref")]
+    refr: &'a str,
+    alt: &'a str,
+    vartype: &'a str,
+    pos_normalised: f64,
+    sample: &'a str,
+    depth: u32,
+
+    count_a: u32,
+    count_t: u32,
+    count_g: u32,
+    count_c: u32,
+    count_n: u32,
+
+    ref_count: u32,
+    alt_count: u32,
+    alt_vaf: f64,
+    
+    read_features: OutputReadFeatures,
+}
+
+// Make branching for snv/indel; make common function for read_features
+impl<'a> OutputRowSNV<'a> {
+    fn from_variant(var: &'a Variant, pos_fraction: f64, sample: &'a str) -> Self {
+        let bcs = var.base_counts_stats().expect("Could not get base count statistics.");
+        let read_features = OutputReadFeatures::from(var.normalized_row());
+
+        let f = match &var.features {
+            LocusFeatures::Snv(f) => f,
+            LocusFeatures::Indel(_) => panic!("Expected SNV features"),
+        };
+
+        Self {
+            chrom: &var.chrom,
+            pos: var.pos,
+            refr: &var.refr,
+            alt: &var.alt,
+            vartype: &var.vartype.as_str(),
+            pos_normalised: pos_fraction,
+            sample: &sample,
+            depth: bcs.depth,
+            
+            count_a: f.base_counts.a,
+            count_t: f.base_counts.t,
+            count_g: f.base_counts.g,
+            count_c: f.base_counts.c,
+            count_n: f.base_counts.n,
+
+            ref_count: bcs.ref_count,
+            alt_count: bcs.alt_count,
+            alt_vaf: bcs.alt_vaf,
+
+            read_features,
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+struct OutputRowINDEL<'a> {
+    chrom: &'a str,
+    pos: u64,
+    #[serde(rename = "ref")]
+    refr: &'a str,
+    alt: &'a str,
+    vartype: &'a str,
+    pos_normalised: f64,
+    sample: &'a str,
+    depth: u32,
+
+    ref_count: u32,
+    alt_count: u32,
+    other_count: u32,
+    alt_vaf: f64,
+    overlapping_indels_count: u64,
+
+    read_features: OutputReadFeatures,
+}
+
+// Make branching for snv/indel; make common function for read_features
+impl<'a> OutputRowINDEL<'a> {
+    fn from_variant(var: &'a Variant, pos_fraction: f64, sample: &'a str) -> Self {
+        let read_features = OutputReadFeatures::from(var.normalized_row());
+
+        let stats = var.indel_stats().expect("Could not get indel count statistics.");
+
+        Self {
+            chrom: &var.chrom,
+            pos: var.pos,
+            refr: &var.refr,
+            alt: &var.alt,
+            vartype: &var.vartype.as_str(),
+            pos_normalised: pos_fraction,
+            sample: &sample,
+            depth: stats.depth,
+
+            ref_count: stats.ref_count,
+            alt_count: stats.alt_count,
+            other_count: stats.other_count,
+            alt_vaf: stats.alt_vaf,
+            overlapping_indels_count: stats.overlapping_indels_count,
+
+            read_features,
         }
     }
 }
