@@ -23,7 +23,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Region Chromosome: {}, Min Pos: {}, Max Pos: {}", &region_chrom, min_pos, max_pos);
 
-    process_bam_region(&mut variants, &bam_path, &region_chrom, min_pos, max_pos, &csv_path, &sample)?;
+    // VARCLASS INPUT TEMP FIX FOR CSV HEADER
+    process_bam_region(&mut variants, &bam_path, &region_chrom, min_pos, max_pos, &csv_path, &sample, &varclass)?;
 
     Ok(())
 }
@@ -778,11 +779,22 @@ fn process_bam_region(
     max_pos: u64,
     csv_path: &str,
     sample: &str,
+    // FOR TEMP HEADER FIX
+    varclass: &str,
+    //
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut bam_reader = IndexedReader::from_path(bam_path)?;
     bam_reader.fetch((region_chrom, min_pos - 1, max_pos))?;
 
     let mut csv_writer = Writer::from_path(csv_path)?;
+
+    // TEMP HEADER CSV FIX
+    match varclass {
+        "SNV" =>  csv_writer.write_record(CSV_HEADER_SNV)?,
+        "INDEL" =>  csv_writer.write_record(CSV_HEADER_INDEL)?,
+        _ => {}
+    }
+    //
 
     let ref_seq_len = get_ref_len(&bam_reader, &region_chrom)?;
 
@@ -1043,3 +1055,100 @@ impl<'a> OutputRowINDEL<'a> {
         }
     }
 }
+
+// TEMP HEADER FIX
+const CSV_HEADER_SNV: &[&str] = &[
+    "chrom",
+    "pos",
+    "ref",
+    "alt",
+    "vartype",
+    "pos_normalised",
+    "sample",
+    "depth",
+    "count_a",
+    "count_t",
+    "count_g",
+    "count_c",
+    "count_n",
+    "ref_count",
+    "alt_count",
+    "alt_vaf",
+    "ref_nm",
+    "ref_base_qual",
+    "ref_map_qual",
+    "ref_align_len",
+    "ref_clipping",
+    "ref_indel",
+    "ref_forward_strand",
+    "ref_reverse_strand",
+    "ref_supplementary",
+    "ref_normalised_read_position",
+    "alt_nm",
+    "alt_base_qual",
+    "alt_map_qual",
+    "alt_align_len",
+    "alt_clipping",
+    "alt_indel",
+    "alt_forward_strand",
+    "alt_reverse_strand",
+    "alt_supplementary",
+    "alt_normalised_read_position",
+    "all_nm",
+    "all_base_qual",
+    "all_map_qual",
+    "all_align_len",
+    "all_clipping",
+    "all_indel",
+    "all_forward_strand",
+    "all_reverse_strand",
+    "all_supplementary",
+    "all_normalised_read_position",
+];
+
+const CSV_HEADER_INDEL: &[&str] = &[
+    "chrom",
+    "pos",
+    "ref",
+    "alt",
+    "vartype",
+    "pos_normalised",
+    "sample",
+    "depth",
+    "ref_count",
+    "alt_count",
+    "alt_vaf",
+    "other_count",
+    "overlapping_indels_count",
+    "ref_nm",
+    "ref_base_qual",
+    "ref_map_qual",
+    "ref_align_len",
+    "ref_clipping",
+    "ref_indel",
+    "ref_forward_strand",
+    "ref_reverse_strand",
+    "ref_supplementary",
+    "ref_normalised_read_position",
+    "alt_nm",
+    "alt_base_qual",
+    "alt_map_qual",
+    "alt_align_len",
+    "alt_clipping",
+    "alt_indel",
+    "alt_forward_strand",
+    "alt_reverse_strand",
+    "alt_supplementary",
+    "alt_normalised_read_position",
+    "all_nm",
+    "all_base_qual",
+    "all_map_qual",
+    "all_align_len",
+    "all_clipping",
+    "all_indel",
+    "all_forward_strand",
+    "all_reverse_strand",
+    "all_supplementary",
+    "all_normalised_read_position",
+];
+//
