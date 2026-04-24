@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::cmp;
 use std::io::{BufRead, BufReader};
 use std::collections::VecDeque;
 use std::error::Error;
@@ -94,9 +95,7 @@ fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<
 	Ok(variants)
 }
 
-fn is_acceptable_variant(row: Vec<&str>, varclass: &str, )
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum VarType {
     Snv,
     Del,
@@ -152,20 +151,30 @@ impl Variant {
         }
     }
 
-    fn count_locus_features(&mut self, read: &Rc<Record>, base: Option<u8>, qpos: Option<u32>) {
+    fn count_locus_features(&mut self, read: &Rc<Record>, ref_pos: u64) {
+        let qpos = self.ref_pos_to_query_pos(read, ref_pos);
+
         match &mut self.features {
             LocusFeatures::Snv(f) => {
                 if let (Some(refr_char), Some(alt_char)) =
                     (self.refr.chars().next(), self.alt.chars().next())
                 {
+                    // Can move this into child
+                    let seq = read.seq();
+                    let base: Option<u8> = qpos.and_then(|pos| {
+                        let i = pos as usize;
+                        if i < seq.len() {
+                            Some(seq[i])
+                        } else {
+                            None
+                        }
+                    });
+                    //
                     f.count(read, base, refr_char, alt_char, qpos);
                 }
             }
             LocusFeatures::Indel(f) => {
-                // Placeholder logic: you will need your own criterion
-                // for whether this read supports alt or ref for an indel.
-                let is_alt_support = false;
-                f.count(read, is_alt_support, qpos);
+                f.count(read, &self.refr, &self.alt, ref_pos, qpos, &self.vartype);
             }
         }
     }
@@ -176,6 +185,11 @@ impl Variant {
 
     fn get_pos_fraction(&self, ref_seq_len: u64) -> f64 {
         self.pos as f64/ ref_seq_len as f64
+    }
+
+    fn ref_pos_to_query_pos (&self, read: &Record, target_pos: u64) -> Option<u32> {
+        let cigar = read.cigar();
+        Some(cigar.read_pos(target_pos as u32, false, false).ok()?)?
     }
 }
 
@@ -252,7 +266,14 @@ struct LocusFeaturesSNV {
 }
 
 impl LocusFeaturesSNV {
-    fn count(&mut self, read: &Rc<Record>, base: Option<u8>, refr: char, alt: char, query_pos: Option<u32>) {
+    fn count(
+        &mut self,
+        read: &Rc<Record>,
+        base: Option<u8>,
+        refr: char,
+        alt: char,
+        query_pos: Option<u32>,
+    ) {
         if let Some(base_u8) = base {
             let base_char = base_u8 as char;
 
@@ -269,29 +290,180 @@ impl LocusFeaturesSNV {
     }
 }
 
+#[derive(Debug, Clone)]
+struct IndelEvent {
+    indel_type: VarType,
+    start: u64,
+    end: u64,
+    bases: String,
+}
+
 #[derive(Debug, Clone, Default)]
 struct LocusFeaturesINDEL {
+    overlapping_indels_count: u64,
     common: CommonLocusFeatures,
 }
 
 impl LocusFeaturesINDEL {
-    fn count(&mut self, read: &Rc<Record>, base: Option<u8>, refr: str, alt: str, query_pos: Option<u32>) {
-        
-        if base_char == refr {
+    fn count(
+        &mut self,
+        read: &Rc<Record>,
+        refr: &str,
+        alt: &str,
+        ref_pos: u64,
+        query_pos: Option<u32>,
+        indel_type: &VarType,
+    ) {
+        let start = self.get_indel_start_coord(ref_pos, refr, alt);
+        let size = refr.len().abs_diff(alt.len()) as u64;
+        let end = start + size - 1;
+
+        let overlapping_indels = self.indels_overlapping_variant(&read, start, end);
+        self.overlapping_indels_count += overlapping_indels.len() as u64;
+
+        let mut read_supports_alt = false;
+
+        let bases = match indel_type {
+            VarType::Del => Some(String::new()),
+            VarType::Ins => Some(alt[1..].to_string()),
+            _ => None,
+        };
+
+        for event in overlapping_indels.iter() {
+            if event.indel_type == *indel_type {
+                if (event.start == start) && (event.end == end) {
+                    if matches!(indel_type, VarType::Del) ||           // FIX UNWRAP HERE
+                    (matches!(indel_type, VarType::Ins) && event.bases == bases.clone().unwrap()) {
+                        read_supports_alt = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        let mut read_supports_ref = false;
+        if overlapping_indels.is_empty() && let Some(qpos) = query_pos {
+            let seq_bytes = read.seq().as_bytes();
+            let read_bases = match indel_type {
+                VarType::Ins => {
+                    Some((seq_bytes[qpos as usize] as char)
+                    .to_string()
+                    .to_ascii_uppercase())
+                },
+                VarType::Del => {
+                    Some(String::from_utf8(
+                        seq_bytes[qpos as usize .. (qpos + (size as u32) + 1) as usize].to_vec()
+                    )
+                    .unwrap()
+                    .to_ascii_uppercase())
+                },
+                _ => None,
+            };
+            
+            // FIX UNWRAP HERE
+            if refr == read_bases.unwrap() {
+                read_supports_ref = true;
+            }
+        }
+
+        if read_supports_ref {
             self.common.ref_read_features.count(read, query_pos);
-        } else if base_char == alt {
+        } else if read_supports_alt {
             self.common.alt_read_features.count(read, query_pos);
         }
 
         self.common.all_read_features.count(&read, query_pos);
     }
 
-    fn get_indel_start_coord(pos: Option<u32>, ref, alt) {
-        len_ref = len(ref)
-        len_alt = len(alt)
-        shortest_len = min(len_ref, len_alt)
-        return pos + shortest_len
+    // get the genome coordinates of where an INDEL variant will actually
+    // start, as opposed to the location of where the variant is reported
+    // the starting position must take into account the context bases that
+    // are given when the variant is reported in the VCF file.
+    // Note: if we assume normalized biallelic variants, could just do (pos + 1)
+    fn get_indel_start_coord(&self, pos: u64, refr: &str, alt: &str) -> u64 {
+        let shortest_len = cmp::min(refr.len(), alt.len());
+        pos + shortest_len as u64
     }
+
+    // True if the intervals of two indels overlap
+    fn interval_overlaps(&self, start1: u64, end1: u64, start2: u64, end2: u64) -> bool {
+        !((end1 < start2) || (start1 > end2))
+    }
+
+    // Determine the allele in the read at the locus of an INDEL variant
+    fn indels_overlapping_variant(
+        &self,
+        read: &Rc<Record>,
+        var_start: u64,
+        var_end: u64,
+    ) -> Vec<IndelEvent> {
+        let mut read_pos: u32 = 0;
+        let mut ref_pos = read.pos() as u32;
+        let mut result = Vec::new();
+
+        // See https://samtools.github.io/hts-specs/SAMv1.pdf page 8 for how CIGAR consumes
+        for c in read.cigar().iter() {
+            match *c {
+                // Consumes both reference and query
+                Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
+                    ref_pos += len;
+                    read_pos += len;
+                }
+                // Only consumes query
+                Cigar::Ins(len) => {
+                    let this_start = ref_pos as u64;
+                    let this_end = this_start + len as u64 - 1;
+
+                    if self.interval_overlaps(var_start, var_end, this_start, this_end) {
+                        let seq_bytes = read.seq().as_bytes();
+                        let inserted_bases = String::from_utf8(
+                            seq_bytes[read_pos as usize .. (read_pos + len) as usize].to_vec()
+                        )
+                        .unwrap()
+                        .to_ascii_uppercase();
+
+                        result.push(IndelEvent {
+                            indel_type: VarType::Ins,
+                            start: this_start,
+                            end: this_end,
+                            bases: inserted_bases,
+                        });
+                    }
+
+                    read_pos += len;
+                }
+                // Only consumes reference
+                Cigar::Del(len) => {
+                    let this_start = ref_pos as u64;
+                    let this_end = this_start + len as u64 - 1;
+
+                    if self.interval_overlaps(var_start, var_end, this_start, this_end) {
+                        result.push(IndelEvent {
+                            indel_type: VarType::Del,
+                            start: this_start,
+                            end: this_end,
+                            bases: String::new(),
+                        });
+                    }
+
+                    ref_pos += len;
+                }
+                // Only consumes reference
+                Cigar::RefSkip(len) => {
+                    ref_pos += len;
+                }
+                // Only consumes query
+                Cigar::SoftClip(len) => {
+                    read_pos += len;
+                }
+                // Consumes neither reference nor query
+                Cigar::HardClip(_) | Cigar::Pad(_) => {}
+            }
+        }        
+
+        result
+    }
+
 }
 
 #[derive(Debug, Clone, Default)]
@@ -540,11 +712,6 @@ fn get_ref_len(
     Err(format!("Could not find reference '{}' in BAM header", chrom).into())
 }
 
-fn ref_pos_to_query_pos (read: &Record, target_pos: u64) -> Option<u32> {
-    let cigar = read.cigar();
-    Some(cigar.read_pos(target_pos as u32, false, false).ok()?)?
-}
-
 fn skip_read_check(read: &Rc<Record>) -> bool {
     // Check if read is orphan pair as this is skipped in the origial varlap pileup call (ignore_orphans=True)
     if read.is_paired() && !read.is_proper_pair() {
@@ -587,7 +754,6 @@ fn process_bam_region(
         }
 
         let read_start = record.pos() as u64;
-        let seq = record.seq();
 
         loop {
             let should_pop = match variants.front() {
@@ -610,17 +776,7 @@ fn process_bam_region(
             let read_end = record.cigar().end_pos() as u64;
 
             if zero_based_pos >= read_start && zero_based_pos < read_end {
-                // Can probably move this into count_locus_features
-                let qpos = ref_pos_to_query_pos(&record, zero_based_pos);
-                let base: Option<u8> = qpos.and_then(|pos| {
-                    let i = pos as usize;
-                    if i < seq.len() {
-                        Some(seq[i])
-                    } else {
-                        None
-                    }
-                });
-                var.count_locus_features(&record, base, qpos);
+                var.count_locus_features(&record, zero_based_pos);
             } else {
                 break;
             }
