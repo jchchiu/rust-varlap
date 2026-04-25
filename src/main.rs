@@ -8,39 +8,11 @@ use csv::Writer;
 use serde::Serialize;
 use rust_htslib::bam::{Read, IndexedReader, Record};
 use rust_htslib::bam::record::{Aux, Cigar};
-use clap::{Parser, ValueEnum};
 
-#[derive(Debug, Parser)]
-#[command(name = "rust-varlap")]
-#[command(version = "0.0.1")]
-#[command(about = "Quality control tool for genetic variants")]
-struct Cli {
-    /// Input VCF file path
-    #[arg(short, long)]
-    vcf: String,
+mod cli;
+mod variant;
 
-    // Filepaths of BAM files
-    #[arg(short, long)]
-    bams: String,
-
-    /// Type of variants to consider. Options: snv, indel
-    #[arg(long, value_enum)]
-    varclass: VarClass,
-
-    // Filepath of where csv output should be stored
-    #[arg(short, long)]
-    csv_path: String,
-
-    /// Optional sample identifier
-    #[arg(long)]
-    sample: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum VarClass {
-    Snv,
-    Indel,
-}
+use crate::variant::VarClass;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let vcf_path = "test_data/chrM_heavy_stress.vcf";
@@ -49,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let csv_path = "test_data/rust-varlap.output.csv";
     // let sample = "";
 
-    let args = Cli::parse();
+    let args = cli::parse();
     
     let mut variants = vcf_reader(&args.vcf, &args.varclass)?;
 
