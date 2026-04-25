@@ -8,15 +8,50 @@ use csv::Writer;
 use serde::Serialize;
 use rust_htslib::bam::{Read, IndexedReader, Record};
 use rust_htslib::bam::record::{Aux, Cigar};
+use clap::{Parser, ValueEnum};
+
+#[derive(Debug, Parser)]
+#[command(name = "rust-varlap")]
+#[command(version = "0.0.1")]
+#[command(about = "Quality control tool for genetic variants")]
+struct Cli {
+    /// Input VCF file path
+    #[arg(short, long)]
+    vcf: String,
+
+    // Filepaths of BAM files
+    #[arg(short, long)]
+    bams: String,
+
+    /// Type of variants to consider. Options: snv, indel
+    #[arg(long, value_enum)]
+    varclass: VarClass,
+
+    // Filepath of where csv output should be stored
+    #[arg(short, long)]
+    csv_path: String,
+
+    /// Optional sample identifier
+    #[arg(long)]
+    sample: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum VarClass {
+    Snv,
+    Indel,
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let vcf_path = "test_data/chrM_heavy_stress.vcf";
-    let bam_path: &str = "test_data/chrM_heavy_stress.sorted.bam";
-    let varclass = "SNV";
-    let csv_path = "test_data/rust-varlap.output.csv";
-    let sample = "";
+    // let vcf_path = "test_data/chrM_heavy_stress.vcf";
+    // let bam_path: &str = "test_data/chrM_heavy_stress.sorted.bam";
+    // let varclass = "SNV";
+    // let csv_path = "test_data/rust-varlap.output.csv";
+    // let sample = "";
+
+    let args = Cli::parse();
     
-    let mut variants = vcf_reader(&vcf_path, &varclass)?;
+    let mut variants = vcf_reader(&args.vcf, &args.varclass)?;
 
     let (region_chrom, min_pos, max_pos) = 
         get_vcf_min_max(&variants).ok_or("Could not determine VCF min/max")?;
@@ -24,13 +59,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Region Chromosome: {}, Min Pos: {}, Max Pos: {}", &region_chrom, min_pos, max_pos);
 
     // VARCLASS INPUT TEMP FIX FOR CSV HEADER
-    process_bam_region(&mut variants, &bam_path, &region_chrom, min_pos, max_pos, &csv_path, &sample, &varclass)?;
+    process_bam_region(&mut variants, &args.bams, &region_chrom, min_pos, max_pos, &args.csv_path, args.sample.as_deref(), &args.varclass)?;
 
     Ok(())
 }
 
-// Change to bcf::Reader? so can handle gzip files?
-fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<dyn Error>> {
+fn vcf_reader(file_path: &str, varclass: &VarClass) -> Result<VecDeque<Variant>, Box<dyn Error>> {
     let file = File::open(file_path)?;
     let reader = BufReader::new(file);
 
@@ -60,8 +94,8 @@ fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<
             for alt in fields[4].split(',') {
                 let vartype = get_var_type(&refr, alt);
 
-                match varclass.to_ascii_uppercase().as_str() {
-                    "SNV" => {
+                match varclass {
+                    VarClass::Snv => {
                         if matches!(vartype, VarType::Snv) {
                             variants.push_back(Variant {
                                 chrom: chrom.clone(),
@@ -73,7 +107,7 @@ fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<
                             });
                         }
                     }
-                    "INDEL" => {
+                    VarClass::Indel => {
                         if matches!(vartype, VarType::Ins | VarType::Del) {
                             variants.push_back(Variant {
                                 chrom: chrom.clone(),
@@ -85,7 +119,6 @@ fn vcf_reader(file_path: &str, varclass: &str) -> Result<VecDeque<Variant>, Box<
                             });
                         }
                     }
-                    _ => continue,
                 }
             }
         } else {
@@ -778,9 +811,9 @@ fn process_bam_region(
     min_pos: u64, 
     max_pos: u64,
     csv_path: &str,
-    sample: &str,
+    sample: Option<&str>,
     // FOR TEMP HEADER FIX
-    varclass: &str,
+    varclass: &VarClass,
     //
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut bam_reader = IndexedReader::from_path(bam_path)?;
@@ -790,9 +823,8 @@ fn process_bam_region(
 
     // TEMP HEADER CSV FIX
     match varclass {
-        "SNV" =>  csv_writer.write_record(CSV_HEADER_SNV)?,
-        "INDEL" =>  csv_writer.write_record(CSV_HEADER_INDEL)?,
-        _ => {}
+        VarClass::Snv =>  csv_writer.write_record(CSV_HEADER_SNV)?,
+        VarClass::Indel =>  csv_writer.write_record(CSV_HEADER_INDEL)?,
     }
     //
 
@@ -816,7 +848,7 @@ fn process_bam_region(
             if should_pop {
                 if let Some(var) = variants.pop_front() {
                     let pos_fraction = var.get_pos_fraction(ref_seq_len);
-                    write_variant_row(&mut csv_writer, &var, pos_fraction, &sample)?;
+                    write_variant_row(&mut csv_writer, &var, pos_fraction, sample)?;
                 }
             } else {
                 break;
@@ -837,7 +869,7 @@ fn process_bam_region(
 
     while let Some(var) = variants.pop_front() {
         let pos_fraction = var.get_pos_fraction(ref_seq_len);
-        write_variant_row(&mut csv_writer, &var, pos_fraction, &sample)?;
+        write_variant_row(&mut csv_writer, &var, pos_fraction, sample)?;
     }
     csv_writer.flush()?;
 
@@ -850,7 +882,7 @@ fn write_variant_row(
     writer: &mut Writer<File>,
     var: &Variant,
     pos_fraction: f64,
-    sample: &str,
+    sample: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
     writer.serialize(OutputRow::from_variant(var, pos_fraction, sample))?;
     Ok(())
@@ -938,7 +970,7 @@ enum OutputRow<'a> {
 }
 
 impl<'a> OutputRow<'a> {
-    fn from_variant(var: &'a Variant, pos_fraction: f64, sample: &'a str) -> Self {
+    fn from_variant(var: &'a Variant, pos_fraction: f64, sample: Option<&'a str>) -> Self {
         match &var.features {
             LocusFeatures::Snv(_) => OutputRow::Snv(OutputRowSNV::from_variant(var, pos_fraction, sample)),
             LocusFeatures::Indel(_) => OutputRow::Indel(OutputRowINDEL::from_variant(var, pos_fraction, sample)),
@@ -955,7 +987,7 @@ struct OutputRowSNV<'a> {
     alt: &'a str,
     vartype: &'a str,
     pos_normalised: f64,
-    sample: &'a str,
+    sample: Option<&'a str>,
     depth: u32,
 
     count_a: u32,
@@ -973,7 +1005,7 @@ struct OutputRowSNV<'a> {
 
 // Make branching for snv/indel; make common function for read_features
 impl<'a> OutputRowSNV<'a> {
-    fn from_variant(var: &'a Variant, pos_fraction: f64, sample: &'a str) -> Self {
+    fn from_variant(var: &'a Variant, pos_fraction: f64, sample: Option<&'a str>) -> Self {
         let bcs = var.base_counts_stats().expect("Could not get base count statistics.");
         let read_features = OutputReadFeatures::from(var.normalized_row());
 
@@ -989,7 +1021,7 @@ impl<'a> OutputRowSNV<'a> {
             alt: &var.alt,
             vartype: &var.vartype.as_str(),
             pos_normalised: pos_fraction,
-            sample: &sample,
+            sample: sample,
             depth: bcs.depth,
             
             count_a: f.base_counts.a,
@@ -1016,7 +1048,7 @@ struct OutputRowINDEL<'a> {
     alt: &'a str,
     vartype: &'a str,
     pos_normalised: f64,
-    sample: &'a str,
+    sample: Option<&'a str>,
     depth: u32,
 
     ref_count: u32,
@@ -1030,7 +1062,7 @@ struct OutputRowINDEL<'a> {
 
 // Make branching for snv/indel; make common function for read_features
 impl<'a> OutputRowINDEL<'a> {
-    fn from_variant(var: &'a Variant, pos_fraction: f64, sample: &'a str) -> Self {
+    fn from_variant(var: &'a Variant, pos_fraction: f64, sample: Option<&'a str>) -> Self {
         let read_features = OutputReadFeatures::from(var.normalized_row());
 
         let stats = var.indel_stats().expect("Could not get indel count statistics.");
@@ -1042,7 +1074,7 @@ impl<'a> OutputRowINDEL<'a> {
             alt: &var.alt,
             vartype: &var.vartype.as_str(),
             pos_normalised: pos_fraction,
-            sample: &sample,
+            sample: sample,
             depth: stats.depth,
 
             ref_count: stats.ref_count,
