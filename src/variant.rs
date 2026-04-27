@@ -1,8 +1,5 @@
-// use std::fs::File;
-// use std::io::{BufRead, BufReader};
-// use std::collections::VecDeque;
 use clap::ValueEnum;
-use crate::{LocusFeatures, BaseCountsSNVStats, INDELCountsStats, NormalizedLocusFeaturesRow};
+use crate::features::{LocusFeatures, NormalizedLocusFeaturesRow, AlleleCountsSnvStats, AlleleCountsIndelStats};
 use std::rc::Rc;
 use rust_htslib::bam::{Record};
 
@@ -17,7 +14,7 @@ pub struct Variant {
 }
 
 impl Variant {
-    pub fn base_counts_stats(&self) -> Option<BaseCountsSNVStats> {
+    pub fn base_counts_stats(&self) -> Option<AlleleCountsSnvStats> {
         let ref_char = self.refr.chars().next()?;
         let alt_char = self.alt.chars().next()?;
 
@@ -27,7 +24,7 @@ impl Variant {
         }
     }
 
-    pub fn indel_stats(&self) -> Option<INDELCountsStats> {
+    pub fn indel_stats(&self) -> Option<AlleleCountsIndelStats> {
         match &self.features {
             LocusFeatures::Snv(_) => None,
             LocusFeatures::Indel(f) => Some(f.stats()),

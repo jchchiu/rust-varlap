@@ -4,7 +4,8 @@ use std::collections::VecDeque;
 use std::error::Error;
 
 use crate::variant::{VarClass, VarType};
-use crate::{Variant, LocusFeatures, LocusFeaturesINDEL, LocusFeaturesSNV};
+use crate::{Variant};
+use crate::features::{LocusFeatures, LocusFeaturesIndel, LocusFeaturesSnv};
 
 pub fn parse(file_path: &str, varclass: &VarClass) -> Result<VecDeque<Variant>, Box<dyn Error>> {
     let file = File::open(file_path)?;
@@ -14,9 +15,17 @@ pub fn parse(file_path: &str, varclass: &VarClass) -> Result<VecDeque<Variant>, 
 
     for line_result in reader.lines() {
         let line = line_result?;
+
         if line.starts_with("#") {
             continue;
-            }
+        }
+
+        // if line.starts_with("#") && !is_valid_vcf_header_line(&line) {
+        //     match {
+        //         Ok() => continue,
+        //         Err(error) => panic!("Invalid VCF: {error:?}"),
+        //     };
+        // }
         
         let fields: Vec<&str> = line.split_whitespace().collect();
         
@@ -45,7 +54,7 @@ pub fn parse(file_path: &str, varclass: &VarClass) -> Result<VecDeque<Variant>, 
                                 refr: refr.clone(),
                                 alt: alt.to_string(),
                                 vartype,
-                                features: LocusFeatures::Snv(LocusFeaturesSNV::default()),
+                                features: LocusFeatures::Snv(LocusFeaturesSnv::default()),
                             });
                         }
                     }
@@ -57,7 +66,7 @@ pub fn parse(file_path: &str, varclass: &VarClass) -> Result<VecDeque<Variant>, 
                                 refr: refr.clone(),
                                 alt: alt.to_string(),
                                 vartype,
-                                features: LocusFeatures::Indel(LocusFeaturesINDEL::default()),
+                                features: LocusFeatures::Indel(LocusFeaturesIndel::default()),
                             });
                         }
                     }
@@ -86,3 +95,8 @@ fn get_var_type(refr: &str, alt: & str) -> VarType {
         VarType::Unknown
     }
 }
+
+// fn is_valid_vcf_header_line(line: &str) -> bool {
+//     let expected = ["#CHROM", "POS", "ID", "REF", "ALT"];
+//     line.split_whitespace().take(5).eq(expected.into_iter())
+// }
