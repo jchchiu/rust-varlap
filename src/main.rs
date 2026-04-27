@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::cmp;
-use std::io::{BufRead, BufReader};
 use std::collections::VecDeque;
 use std::error::Error;
 use std::rc::Rc;
@@ -10,9 +9,10 @@ use rust_htslib::bam::{Read, IndexedReader, Record};
 use rust_htslib::bam::record::{Aux, Cigar};
 
 mod cli;
+mod vcf_parser;
 mod variant;
 
-use crate::variant::VarClass;
+use crate::variant::{Variant, VarClass, VarType};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let vcf_path = "test_data/chrM_heavy_stress.vcf";
@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = cli::parse();
     
-    let mut variants = vcf_reader(&args.vcf, &args.varclass)?;
+    let mut variants = vcf_parser::parse(&args.vcf, &args.varclass)?;
 
     let (region_chrom, min_pos, max_pos) = 
         get_vcf_min_max(&variants).ok_or("Could not determine VCF min/max")?;
@@ -34,176 +34,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     process_bam_region(&mut variants, &args.bams, &region_chrom, min_pos, max_pos, &args.csv_path, args.sample.as_deref(), &args.varclass)?;
 
     Ok(())
-}
-
-fn vcf_reader(file_path: &str, varclass: &VarClass) -> Result<VecDeque<Variant>, Box<dyn Error>> {
-    let file = File::open(file_path)?;
-    let reader = BufReader::new(file);
-
-	let mut variants = VecDeque::new();
-
-    for line_result in reader.lines() {
-        let line = line_result?;
-        if line.starts_with("#") {
-            continue;
-            }
-        
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        
-        if fields.len() >= 5 {
-            let chrom = fields[0].to_string();
-
-            let pos = match fields[1].parse::<u64>() {
-                Ok(p) => p,
-                Err(_) => {
-                    eprintln!("Warning: invalid POS, skipping row: {}", line);
-                    continue;
-                }
-            };
-
-            let refr = fields[3].to_string();
-
-            for alt in fields[4].split(',') {
-                let vartype = get_var_type(&refr, alt);
-
-                match varclass {
-                    VarClass::Snv => {
-                        if matches!(vartype, VarType::Snv) {
-                            variants.push_back(Variant {
-                                chrom: chrom.clone(),
-                                pos,
-                                refr: refr.clone(),
-                                alt: alt.to_string(),
-                                vartype,
-                                features: LocusFeatures::Snv(LocusFeaturesSNV::default()),
-                            });
-                        }
-                    }
-                    VarClass::Indel => {
-                        if matches!(vartype, VarType::Ins | VarType::Del) {
-                            variants.push_back(Variant {
-                                chrom: chrom.clone(),
-                                pos,
-                                refr: refr.clone(),
-                                alt: alt.to_string(),
-                                vartype,
-                                features: LocusFeatures::Indel(LocusFeaturesINDEL::default()),
-                            });
-                        }
-                    }
-                }
-            }
-        } else {
-            eprintln!("Warning: Skipping input row: {}", line);
-        }
-    }
-			
-	Ok(variants)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum VarType {
-    Snv,
-    Del,
-    Ins,
-    Unknown,
-}
-
-impl VarType {
-    fn as_str(&self) -> &'static str {
-        match self {
-            VarType::Snv => "SNV",
-            VarType::Del => "DEL",
-            VarType::Ins => "INS",
-            VarType::Unknown => "UNKNOWN",            
-        }
-    }
-}
-
-fn get_var_type(refr: &str, alt: & str) -> VarType {
-    if refr.len() == 1 && alt.len() == 1 {
-        VarType::Snv
-    } else if refr.len() > alt.len() {
-        VarType::Del
-    } else if refr.len() < alt.len() {
-        VarType::Ins
-    } else {
-        eprintln!(
-            "Warning: Cannot determine the type of variant with ref: {} and alt: {}",
-            refr, alt
-        );
-        VarType::Unknown
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Variant {
-	chrom: String,
-	pos: u64,
-	refr: String,
-	alt: String,
-    vartype: VarType,
-    features: LocusFeatures,
-}
-
-impl Variant {
-    fn base_counts_stats(&self) -> Option<BaseCountsSNVStats> {
-        let ref_char = self.refr.chars().next()?;
-        let alt_char = self.alt.chars().next()?;
-
-        match &self.features {
-            LocusFeatures::Snv(f) => Some(f.base_counts.stats(ref_char, alt_char)),
-            LocusFeatures::Indel(_) => None,
-        }
-    }
-
-    fn indel_stats(&self) -> Option<INDELCountsStats> {
-        match &self.features {
-            LocusFeatures::Snv(_) => None,
-            LocusFeatures::Indel(f) => Some(f.stats()),
-        }
-    }
-
-    fn count_locus_features(&mut self, read: &Rc<Record>, ref_pos: u64) {
-        let qpos = self.ref_pos_to_query_pos(read, ref_pos);
-
-        match &mut self.features {
-            LocusFeatures::Snv(f) => {
-                if let (Some(refr_char), Some(alt_char)) =
-                    (self.refr.chars().next(), self.alt.chars().next())
-                {
-                    // Can move this into child
-                    let seq = read.seq();
-                    let base: Option<u8> = qpos.and_then(|pos| {
-                        let i = pos as usize;
-                        if i < seq.len() {
-                            Some(seq[i])
-                        } else {
-                            None
-                        }
-                    });
-                    //
-                    f.count(read, base, refr_char, alt_char, qpos);
-                }
-            }
-            LocusFeatures::Indel(f) => {
-                f.count(read, &self.refr, &self.alt, ref_pos, qpos, &self.vartype);
-            }
-        }
-    }
-
-    fn normalized_row(&self) -> NormalizedLocusFeaturesRow {
-        self.features.normalized_row()
-    }
-
-    fn get_pos_fraction(&self, ref_seq_len: u64) -> f64 {
-        self.pos as f64/ ref_seq_len as f64
-    }
-
-    fn ref_pos_to_query_pos (&self, read: &Record, target_pos: u64) -> Option<u32> {
-        let cigar = read.cigar();
-        Some(cigar.read_pos(target_pos as u32, false, false).ok()?)?
-    }
 }
 
 // enum LocusFeatures and match?
