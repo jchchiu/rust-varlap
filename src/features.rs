@@ -425,12 +425,21 @@ impl ReadFeatures {
 
         if let Ok(aux) = read.aux(b"NM") {
             match aux {
-                Aux::I8(v) => self.nm += v as u32,
                 Aux::U8(v) => self.nm += v as u32,
-                Aux::I16(v) => self.nm += v as u32,
                 Aux::U16(v) => self.nm += v as u32,
-                Aux::I32(v) => self.nm += v as u32,
                 Aux::U32(v) => self.nm += v as u32,
+                Aux::I8(v) => {
+                    if v > 0 {
+                        self.nm += v as u32}
+                    },
+                Aux::I16(v) => {
+                    if v > 0 {
+                        self.nm += v as u32}
+                    },
+                Aux::I32(v) => {
+                    if v > 0 {
+                        self.nm += v as u32}
+                    },
                 _ => {}
             }
         }
