@@ -173,11 +173,23 @@ impl LocusFeaturesIndel {
                     .to_ascii_uppercase())
                 },
                 VarType::Del => {
-                    Some(String::from_utf8(
-                        seq_bytes[qpos as usize .. (qpos + (size as u32) + 1) as usize].to_vec()
-                    )
-                    .unwrap()
-                    .to_ascii_uppercase())
+                    // TEMP FIX: In python if string slice is out of bounds then it 
+                    // truncates end value to length of vector
+                    // NOTE: MAY NEED TO REWRITE THIS PART; ALSO HOW WE GET QPOS (IS IT EQUIVALENT TO PYTHON CODE?)
+                    if (qpos + (size as u32) + 1) as usize > seq_bytes.len() {
+                        Some(String::from_utf8(
+                            seq_bytes[qpos as usize .. seq_bytes.len() as usize].to_vec()
+                        )
+                        .unwrap()
+                        .to_ascii_uppercase())
+                    } else {
+                        Some(String::from_utf8(
+                            seq_bytes[qpos as usize .. (qpos + (size as u32) + 1) as usize].to_vec()
+                        )
+                        .unwrap()
+                        .to_ascii_uppercase())
+                    }
+                    //
                 },
                 _ => None,
             };
