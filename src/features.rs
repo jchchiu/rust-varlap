@@ -82,11 +82,20 @@ impl LocusFeaturesSnv {
     pub fn count(
         &mut self,
         read: &Rc<Record>,
-        base: Option<u8>,
         refr: char,
         alt: char,
         query_pos: Option<u32>,
     ) {
+        let seq = read.seq();
+        let base: Option<u8> = query_pos.and_then(|pos| {
+            let i = pos as usize;
+            if i < seq.len() {
+                Some(seq[i])
+            } else {
+                None
+            }
+        });
+
         if let Some(base_u8) = base {
             let base_char = base_u8 as char;
 

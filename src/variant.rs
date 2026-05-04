@@ -39,18 +39,7 @@ impl Variant {
                 if let (Some(refr_char), Some(alt_char)) =
                     (self.refr.chars().next(), self.alt.chars().next())
                 {
-                    // Can move this into child
-                    let seq = read.seq();
-                    let base: Option<u8> = qpos.and_then(|pos| {
-                        let i = pos as usize;
-                        if i < seq.len() {
-                            Some(seq[i])
-                        } else {
-                            None
-                        }
-                    });
-                    //
-                    f.count(read, base, refr_char, alt_char, qpos);
+                    f.count(read, refr_char, alt_char, qpos);
                 }
             }
             LocusFeatures::Indel(f) => {
