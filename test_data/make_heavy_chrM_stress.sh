@@ -107,3 +107,13 @@ echo "Variant count:"
 bcftools view -H ${PREFIX}.vcf.gz | wc -l
 
 bgzip -d -f ${PREFIX}.vcf.gz
+
+### Command for generating vcf for chr11 HG00096
+# bcftools mpileup --max-depth 100000 --no-BAQ -q 0 -Q 0 -f human_g1k_v37.fasta HG00096.chrom11.ILLUMINA.bwa.GBR.low_coverage.20120522.bam | \
+# bcftools call -mv -Oz -o HG00096.chr11.vcf.gz
+#
+# tabix -p vcf HG00096.chr11.vcf.gz
+#
+# echo "Variant count:"
+# bcftools view -H HG00096.chr11.vcf.gz | wc -l
+#
