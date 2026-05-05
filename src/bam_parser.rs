@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::rc::Rc;
 use csv::Writer;
 use rust_htslib::bam::{Read, IndexedReader, Record};
@@ -8,7 +9,7 @@ use crate::output::{write_variant_row, CSV_HEADER_SNV, CSV_HEADER_INDEL};
 
 pub fn process_bam_region(
     variants: &mut VecDeque<Variant>,
-    bam_path: &str,
+    bam_path: &PathBuf,
     csv_path: &str,
     sample: Option<&str>,
     // FOR TEMP HEADER FIX

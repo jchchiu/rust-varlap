@@ -1,4 +1,5 @@
 use clap::Parser;
+use std::path::PathBuf;
 
 use crate::variant::VarClass;
 
@@ -9,18 +10,18 @@ use crate::variant::VarClass;
 pub struct Cli {
     /// Input VCF file path
     #[arg(short, long)]
-    pub vcf: String,
+    pub vcf: PathBuf,
 
     /// Filepaths of BAM files
     #[arg(short, long)]
-    pub bams: String,
+    pub bams: PathBuf,
 
     /// Type of variants to consider. Options: snv, indel
     #[arg(long, value_enum)]
     pub varclass: VarClass,
 
     /// Filepath of where csv output should be stored
-    #[arg(short, long)]
+    #[arg(short = 'o', long)]
     pub csv_path: String,
 
     /// Optional sample identifier

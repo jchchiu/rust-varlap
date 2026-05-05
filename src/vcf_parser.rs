@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::path::PathBuf;
 use std::io::{BufRead, BufReader, Read, Seek};
 use std::collections::VecDeque;
 use std::error::Error;
@@ -8,7 +9,7 @@ use crate::variant::{VarClass, VarType};
 use crate::{Variant};
 use crate::features::{LocusFeatures, LocusFeaturesIndel, LocusFeaturesSnv};
 
-pub fn parse(file_path: &str, varclass: &VarClass) -> Result<VecDeque<Variant>, Box<dyn Error>> {
+pub fn parse(file_path: &PathBuf, varclass: &VarClass) -> Result<VecDeque<Variant>, Box<dyn Error>> {
     let reader = check_gzip(file_path)?;
 
 	let mut variants = VecDeque::new();
@@ -103,7 +104,7 @@ fn get_var_type(refr: &str, alt: & str) -> VarType {
 /// Gzip magic bytes: the first two bytes of any gzip-compressed file.
 const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 
-fn check_gzip(file_path: &str) -> Result<Box<dyn BufRead>, Box<dyn Error>> {
+fn check_gzip(file_path: &PathBuf) -> Result<Box<dyn BufRead>, Box<dyn Error>> {
     let mut file = File::open(file_path).unwrap();
 
     // Read the first two bytes to check for gzip magic number

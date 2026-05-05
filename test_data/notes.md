@@ -3,9 +3,9 @@ to build release:
 then run at:
 `./target/release/rust-varlap`
 e.g.
-`time ./target/release/rust-varlap -v /home/jch/genomic-data/HG00096_chr11/HG00096.chr11.vcf.gz -b /home/jch/genomic-data/HG00096_chr11/HG00096.chrom11.ILLUMINA.bwa.GBR.low_coverage.20120522.bam --varclass snv -c test_data/chr11-snv-rust-varlap.output.csv`
+`time ./target/release/rust-varlap -v /home/jch/genomic-data/HG00096_chr11/HG00096.chr11.vcf.gz -b /home/jch/genomic-data/HG00096_chr11/HG00096.chrom11.ILLUMINA.bwa.GBR.low_coverage.20120522.bam --varclass snv -o test_data/chr11-snv-rust-varlap.output.csv`
 
-`time ./target/release/rust-varlap -v /home/jch/genomic-data/HG00096_chr11/HG00096.chr11.vcf.gz -b /home/jch/genomic-data/HG00096_chr11/HG00096.chrom11.ILLUMINA.bwa.GBR.low_coverage.20120522.bam --varclass indel -c test_data/chr11-indel-rust-varlap.output.csv`
+`time ./target/release/rust-varlap -v /home/jch/genomic-data/HG00096_chr11/HG00096.chr11.vcf.gz -b /home/jch/genomic-data/HG00096_chr11/HG00096.chrom11.ILLUMINA.bwa.GBR.low_coverage.20120522.bam --varclass indel -o test_data/chr11-indel-rust-varlap.output.csv`
 
 varlap commands:
 `source varlap_dev/bin/activate`
