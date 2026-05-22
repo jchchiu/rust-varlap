@@ -3,6 +3,10 @@ use crate::features::{LocusFeatures, NormalizedLocusFeaturesRow, AlleleCountsSnv
 use std::rc::Rc;
 use rust_htslib::bam::{Record};
 
+// NOTE: 
+// If we want to process multiple BAMs, we should move the features out
+//  of the variant struct (maybe VariantInfo and VariantFeat structs)
+//  where VariantFeat has an immutable lifetime borrow of VariantInfo
 #[derive(Debug, Clone)]
 pub struct Variant {
 	pub chrom: String,

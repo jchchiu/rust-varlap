@@ -7,7 +7,9 @@ use rust_htslib::bam::{Read, IndexedReader, Record};
 use crate::variant::{Variant, VarClass};
 use crate::output::{write_variant_row, CSV_HEADER_SNV, CSV_HEADER_INDEL};
 
-pub fn process_bam_region(
+// NOTE: For now the algorithm only parses inputs which have a single chromosome only
+// This is temporary depending on how we want to multithread
+pub fn parse_region(
     variants: &mut VecDeque<Variant>,
     bam_path: &PathBuf,
     csv_path: &str,
