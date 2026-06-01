@@ -1,12 +1,11 @@
 mod cli;
-mod vcf_parser;
+mod variant_parser;
 mod variant;
 mod features;
 mod bam_parser;
 mod output;
 
 use crate::variant::Variant;
-use crate::bam_parser::process_bam_region;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let vcf_path = "test_data/chrM_heavy_stress.vcf";
@@ -17,12 +16,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = cli::parse();
     
-    let mut variants = vcf_parser::parse(&args.vcf, &args.varclass)?;
+    let mut variants = variant_parser::parse(&args.variant_file, &args.varclass)?;
 
     // println!("Region Chromosome: {}, Min Pos: {}, Max Pos: {}", &region_chrom, min_pos, max_pos);
 
     // VARCLASS INPUT TEMP FIX FOR CSV HEADER
-    process_bam_region(&mut variants, &args.bams, &args.csv_path, args.sample.as_deref(), &args.varclass)?;
+    bam_parser::parse_region(&mut variants, &args.bam_file, &args.csv_path, args.sample.as_deref(), &args.varclass)?;
 
     Ok(())
 }

@@ -8,13 +8,13 @@ use crate::variant::VarClass;
 #[command(version = "0.0.1")]
 #[command(about = "Quality control tool for genetic variants")]
 pub struct Cli {
-    /// Input VCF file path
+    /// Input variant file path (can be vcf, csv, tsv and be gzipped (.gz))
     #[arg(short, long)]
-    pub vcf: PathBuf,
+    pub variant_file: PathBuf,
 
     /// Filepaths of BAM files
     #[arg(short, long)]
-    pub bams: PathBuf,
+    pub bam_file: PathBuf,
 
     /// Type of variants to consider. Options: snv, indel
     #[arg(long, value_enum)]
