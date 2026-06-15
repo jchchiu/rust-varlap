@@ -1,8 +1,9 @@
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::Path;
 use std::rc::Rc;
 use csv::Writer;
 use rust_htslib::bam::{Read, IndexedReader, Record};
+use anyhow::{Context, Result, bail};
 
 use crate::variant::{Variant, VarClass};
 use crate::output::{write_variant_row, CSV_HEADER_SNV, CSV_HEADER_INDEL};
@@ -11,21 +12,39 @@ use crate::output::{write_variant_row, CSV_HEADER_SNV, CSV_HEADER_INDEL};
 // This is temporary depending on how we want to multithread
 pub fn parse_region(
     variants: &mut VecDeque<Variant>,
-    bam_path: &PathBuf,
+    reads_path: &Path,
     csv_path: &str,
     sample: Option<&str>,
     // FOR TEMP HEADER FIX
     varclass: &VarClass,
     //
+    fasta_path: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let file_type = detect_file_type(reads_path)
+        .with_context(|| format!("Failed to detect file type for {}", reads_path.display()))?;
+    
     // Get min/max position of variants in a given chromosome 
     //  to fetch only reads that are in this region
     // NOTE: This assumes that the variants are of only one chromosome
     let (region_chrom, min_pos, max_pos) = 
         get_vcf_min_max(&variants).ok_or("Could not determine VCF min/max")?;
 
-    let mut bam_reader = IndexedReader::from_path(bam_path)?;
-    bam_reader.fetch((&region_chrom, min_pos - 1, max_pos))?;
+    let mut reader = IndexedReader::from_path(reads_path)?;
+
+    match file_type {
+        FileType::Bam => {}
+        FileType::Cram => {
+            if let Some(path) = fasta_path {
+                reader
+                    .set_reference(path)
+                    .with_context(|| format!("Failed to set CRAM reference to: {}", path.display()))?;
+            } else {
+                return Err("A reference FASTA is required to read CRAM files".into());
+            }
+        },
+    };
+
+    reader.fetch((&region_chrom, min_pos - 1, max_pos))?;
 
     let mut csv_writer = Writer::from_path(csv_path)?;
 
@@ -36,9 +55,9 @@ pub fn parse_region(
     }
     //
 
-    let ref_seq_len = get_ref_len(&bam_reader, &region_chrom)?;
+    let ref_seq_len = get_ref_len(&reader, &region_chrom)?;
 
-    for read_result in bam_reader.rc_records() {
+    for read_result in reader.rc_records() {
         let record = read_result?;
         
         if skip_read_check(&record) {
@@ -82,6 +101,25 @@ pub fn parse_region(
     csv_writer.flush()?;
 
     Ok(()) 
+}
+
+#[derive(Debug, Clone, Copy)]
+enum FileType {
+    Bam,
+    Cram,
+}
+
+fn detect_file_type(path: &Path) -> Result<FileType> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .context("Missing file extension")?;
+
+    match ext {
+        "bam" => Ok(FileType::Bam),
+        "cram" => Ok(FileType::Cram),
+        _ => bail!("Unsupported file format: {}", ext),
+    }
 }
 
 // NOTE: This assumes that the variants from only one chromosome

@@ -21,7 +21,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // println!("Region Chromosome: {}, Min Pos: {}, Max Pos: {}", &region_chrom, min_pos, max_pos);
 
     // VARCLASS INPUT TEMP FIX FOR CSV HEADER
-    bam_parser::parse_region(&mut variants, &args.bam_file, &args.csv_path, args.sample.as_deref(), &args.varclass)?;
+    bam_parser::parse_region(
+        &mut variants, 
+        &args.bam_file, 
+        &args.csv_path, 
+        args.sample.as_deref(), 
+        &args.varclass, 
+        args.fasta_file.as_deref()
+    )?;
 
     Ok(())
 }
