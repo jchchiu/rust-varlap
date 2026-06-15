@@ -27,6 +27,10 @@ pub struct Cli {
     /// Optional sample identifier
     #[arg(long)]
     pub sample: Option<String>,
+
+    /// Required for CRAM: Filepath of FASTA file associated with CRAM file
+    #[arg(long)]
+    pub fasta_file: Option<PathBuf>,
 }
 
 pub fn parse() -> Cli {
