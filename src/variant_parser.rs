@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use flate2::read::MultiGzDecoder;
@@ -11,7 +11,7 @@ use crate::features::{LocusFeatures, LocusFeaturesIndel, LocusFeaturesSnv};
 use crate::variant::{VarClass, VarType};
 use crate::Variant;
 
-pub fn parse(file_path: &PathBuf, varclass: &VarClass) -> Result<VecDeque<Variant>> {
+pub fn parse(file_path: &Path, varclass: &VarClass) -> Result<VecDeque<Variant>> {
     let file_type = detect_file_type(file_path)
         .with_context(|| format!("Failed to detect file type for {}", file_path.display()))?;
 
@@ -155,7 +155,7 @@ fn get_var_type(refr: &str, alt: &str) -> VarType {
 /// Gzip magic bytes: the first two bytes of any gzip-compressed file.
 const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 
-fn check_valid_gzip(file_path: &PathBuf) -> Result<Box<dyn BufRead>> {
+fn check_valid_gzip(file_path: &Path) -> Result<Box<dyn BufRead>> {
     let mut file = File::open(file_path)
         .with_context(|| format!("failed to open file {}", file_path.display()))?;
 
