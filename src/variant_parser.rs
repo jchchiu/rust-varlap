@@ -1,87 +1,105 @@
-use std::fs::File;
-use std::path::{Path, PathBuf};
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::collections::VecDeque;
-use std::error::Error;
+use std::fs::File;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result, bail};
 use flate2::read::MultiGzDecoder;
+use log::{debug, info, warn};
 
-use crate::variant::{VarClass, VarType};
-use crate::{Variant};
 use crate::features::{LocusFeatures, LocusFeaturesIndel, LocusFeaturesSnv};
+use crate::variant::{VarClass, VarType};
+use crate::Variant;
 
-pub fn parse(file_path: &PathBuf, varclass: &VarClass) -> Result<VecDeque<Variant>, Box<dyn Error>> {
-    let file_type = detect_file_type(file_path)?;
+pub fn parse(file_path: &PathBuf, varclass: &VarClass) -> Result<VecDeque<Variant>> {
+    let file_type = detect_file_type(file_path)
+        .with_context(|| format!("Failed to detect file type for {}", file_path.display()))?;
 
-    let reader = check_valid_gzip(file_path)?;
+    let reader = check_valid_gzip(file_path)
+        .with_context(|| format!("Failed to open reader for {}", file_path.display()))?;
 
-	let mut variants = VecDeque::new();
+    info!(
+        "Parsing variants from {} as {:?}",
+        file_path.display(),
+        file_type
+    );
 
-    for line_result in reader.lines() {
-        let line = line_result?;
+    let mut variants = VecDeque::new();
 
-        if line.starts_with("#") {
+    for (line_no, line_result) in reader.lines().enumerate() {
+        let line = line_result.with_context(|| {
+            format!("Failed reading line {} from {}", line_no + 1, file_path.display())
+        })?;
+
+        if line.starts_with('#') {
             continue;
         }
 
-        // if line.starts_with("#CHROM") && !is_valid_vcf_header_line(&line) {
-        //     break;
-        // } else {
-        //     continue
-        // }
-        
-        // NOTE: CSV must not have multiallelic sites, as we are splitting by ","
         let fields: Vec<&str> = match file_type {
             FileType::Vcf | FileType::Tsv => line.split_whitespace().collect(),
-            FileType::Csv => line.split(",").collect(),
+            FileType::Csv => line.split(',').collect(),
         };
-        
-        if fields.len() >= 5 {
-            let chrom = fields[0].to_string();
 
-            let pos = match fields[1].parse::<u64>() {
-                Ok(p) => p,
-                Err(_) => {
-                    eprintln!("Warning: invalid POS, skipping row: {}", line);
-                    continue;
-                }
-            };
+        if fields.len() < 5 {
+            warn!("Skipping ipnut row at line {}: {}", line_no + 1, line);
+            continue;
+        }
 
-            let refr = fields[3].to_string();
+        let chrom = fields[0].to_string();
 
-            for alt in fields[4].split(',') {
-                let vartype = get_var_type(&refr, alt);
-
-                if is_acceptable_variant(&varclass, &vartype, &refr, &alt){
-                    match varclass {
-                        VarClass::Snv => {
-                            variants.push_back(Variant {
-                                chrom: chrom.clone(),
-                                pos,
-                                refr: refr.clone(),
-                                alt: alt.to_string(),
-                                vartype,
-                                features: LocusFeatures::Snv(LocusFeaturesSnv::default()),
-                            });
-                        }
-                        VarClass::Indel => {
-                            variants.push_back(Variant {
-                                chrom: chrom.clone(),
-                                pos,
-                                refr: refr.clone(),
-                                alt: alt.to_string(),
-                                vartype,
-                                features: LocusFeatures::Indel(LocusFeaturesIndel::default()),
-                            });
-                        }
-                    }
-                }
+        let pos = match fields[1].parse::<u64>() {
+            Ok(p) => p,
+            Err(err) => {
+                warn!(
+                    "Invalid POS at line {}: {} ({err})",
+                    line_no + 1,
+                    line
+                );
+                continue;
             }
-        } else {
-            eprintln!("Warning: Skipping input row: {}", line);
+        };
+
+        let refr = fields[3].to_string();
+
+        for alt in fields[4].split(',') {
+            let vartype = get_var_type(&refr, alt);
+
+            if is_acceptable_variant(varclass, &vartype, &refr, alt) {
+                let variant = match varclass {
+                    VarClass::Snv => Variant {
+                        chrom: chrom.clone(),
+                        pos,
+                        refr: refr.clone(),
+                        alt: alt.to_string(),
+                        vartype,
+                        features: LocusFeatures::Snv(LocusFeaturesSnv::default()),
+                    },
+                    VarClass::Indel => Variant {
+                        chrom: chrom.clone(),
+                        pos,
+                        refr: refr.clone(),
+                        alt: alt.to_string(),
+                        vartype,
+                        features: LocusFeatures::Indel(LocusFeaturesIndel::default()),
+                    },
+                };
+
+                variants.push_back(variant);
+            } else {
+                debug!(
+                    "Skipped invalid variant at line {}: chrom={} pos={} ref={} alt={}",
+                    line_no + 1,
+                    chrom,
+                    pos,
+                    refr,
+                    alt
+                );
+            }
         }
     }
 
-	Ok(variants)
+    info!("Parsed {} variants from {}", variants.len(), file_path.display());
+    Ok(variants)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -91,18 +109,17 @@ enum FileType {
     Tsv,
 }
 
-fn detect_file_type(path: &Path) -> Result<FileType, Box<dyn Error>> {
+fn detect_file_type(path: &Path) -> Result<FileType> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
-        .ok_or("Missing file extension")?;
+        .context("Missing file extension")?;
 
-    // Handle .vcf.gz
     let actual_ext = if ext == "gz" {
         path.file_stem()
             .and_then(|s| Path::new(s).extension())
             .and_then(|e| e.to_str())
-            .ok_or("Invalid gzipped filename")?
+            .context("Invalid gzipped filename; expected something like .vcf.gz")?
     } else {
         ext
     };
@@ -111,11 +128,11 @@ fn detect_file_type(path: &Path) -> Result<FileType, Box<dyn Error>> {
         "vcf" => Ok(FileType::Vcf),
         "csv" => Ok(FileType::Csv),
         "tsv" => Ok(FileType::Tsv),
-        _ => Err(format!("Unsupported file extension: {}", actual_ext).into()),
+        _ => bail!("Unsupported file format: {}", actual_ext),
     }
 }
 
-fn get_var_type(refr: &str, alt: & str) -> VarType {
+fn get_var_type(refr: &str, alt: &str) -> VarType {
     if refr.len() == 1 && alt.len() == 1 {
         VarType::Snv
     } else if refr.len() > alt.len() {
@@ -123,10 +140,7 @@ fn get_var_type(refr: &str, alt: & str) -> VarType {
     } else if refr.len() < alt.len() {
         VarType::Ins
     } else {
-        eprintln!(
-            "Warning: Cannot determine the type of variant with ref: {} and alt: {}",
-            refr, alt
-        );
+        warn!("Cannot determine the type of variant with ref:{} and alt:{}", refr, alt);
         VarType::Unknown
     }
 }
@@ -141,20 +155,26 @@ fn get_var_type(refr: &str, alt: & str) -> VarType {
 /// Gzip magic bytes: the first two bytes of any gzip-compressed file.
 const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 
-fn check_valid_gzip(file_path: &PathBuf) -> Result<Box<dyn BufRead>, Box<dyn Error>> {
-    let mut file = File::open(file_path)?;
+fn check_valid_gzip(file_path: &PathBuf) -> Result<Box<dyn BufRead>> {
+    let mut file = File::open(file_path)
+        .with_context(|| format!("failed to open file {}", file_path.display()))?;
 
     // Read the first two bytes to check for gzip magic number
     let mut magic = [0u8; 2];
-    let bytes_read = file.read(&mut magic)?;
+    let bytes_read = file
+        .read(&mut magic)
+        .with_context(|| format!("Failed to read header from {}", file_path.display()))?;
 
     // Seek back to the beginning so the reader starts from byte 0
-    file.seek(SeekFrom::Start(0))?;
+    file.seek(SeekFrom::Start(0))
+        .with_context(|| format!("Failed to reseek start of file {}", file_path.display()))?;
 
     if bytes_read >= 2 && magic == GZIP_MAGIC {
+        debug!("Detected gzip-compressed input: {}", file_path.display());
         let decoder = MultiGzDecoder::new(file);
         Ok(Box::new(BufReader::new(decoder)))
     } else {
+        debug!("Detected plain-text input: {}", file_path.display());
         Ok(Box::new(BufReader::new(file)))
     }
 }
@@ -209,12 +229,8 @@ fn is_desired_type(varclass: &VarClass, vartype: &VarType) -> bool {
 fn is_valid_indel(refr: &str, alt: &str) -> bool {
     match refr.len().cmp(&alt.len()) {
         std::cmp::Ordering::Equal => false,
-        std::cmp::Ordering::Less => {
-            !refr.is_empty() && alt.starts_with(refr)
-        }
-        std::cmp::Ordering::Greater => {
-            !alt.is_empty() && refr.starts_with(alt)
-        }
+        std::cmp::Ordering::Less => !refr.is_empty() && alt.starts_with(refr),
+        std::cmp::Ordering::Greater => !alt.is_empty() && refr.starts_with(alt),
     }
 }
 
