@@ -16,16 +16,14 @@ pub fn write_header(
     varclass: &VarClass,
 ) -> Result<()> {
     let label_prefix = match label {
-        Some(label) => format!("{label} "),
+        Some(label) => label,
         None => {
-            let file_name = reads_path
+            reads_path
                 .file_name()
                 .context("Invalid or missing file name")?
                 .to_str()
-                .context("File name contains invalid UTF-8")?;
-
-            format!("{file_name} ")
-        }
+                .context("File name contains invalid UTF-8")?
+        },
     };
 
     let dynamic_headers = match varclass {
@@ -35,7 +33,7 @@ pub fn write_header(
 
     let labelled_dynamic: Vec<String> = dynamic_headers
         .iter()
-        .map(|col| format!("{label_prefix}{col}"))
+        .map(|field| format!("{label_prefix} {field}"))
         .collect();
 
     writer.write_record(

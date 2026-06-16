@@ -27,7 +27,9 @@ flowchart TD
     subgraph Output
 
     csv_filename:::required@{ shape: manual-input, label: "USER INPUT \n CSV output path" } --> write_header@{ shape: win-pane, label: "Write header row" }
+    label:::optional@{ shape: manual-input, label: "USER INPUT \n Label \n for bam header "}
     write_header --> variant_output@{ shape: win-pane, label: "CSV output of variant statistics" }
+    label --> write_header
 
     end
 
@@ -53,7 +55,7 @@ flowchart TD
 
     end
 
-    reads_file -.->|use filename| write_header
+    reads_file -->|if label not provided use filename| write_header
     remove_variant -->|write variant statistics| variant_output
 
 ```
