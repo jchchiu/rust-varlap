@@ -10,6 +10,9 @@ rust-varlap is a rewrite of [varlap](https://github.com/bjpop/varlap) from pytho
 ## Changes
 - The algorithm now iterates over reads instead of variants
 - Multiple bam inputs are not currently supported
+- Changed header output field labels:
+    - e.g. from [label + ' ' + 'ref avg nm'] to [label + ' ' + 'ref_avg_nm']
+    - Easier to split header if necessary (split by ' ' will separate bam label and statistic field)
 
 ## To-do
 - **Fix csv/tsv parsing (figure out best idiomatic way in rust to reduce resources/minimize friction when attempting multithreading/duplicate code)**

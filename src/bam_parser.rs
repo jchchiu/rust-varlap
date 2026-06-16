@@ -1,12 +1,12 @@
 use std::collections::VecDeque;
 use std::path::Path;
 use std::rc::Rc;
-use csv::Writer;
+use csv::{WriterBuilder};
 use rust_htslib::bam::{Read, IndexedReader, Record};
 use anyhow::{Context, Result, bail};
 
 use crate::variant::{Variant, VarClass};
-use crate::output::{write_variant_row, CSV_HEADER_SNV, CSV_HEADER_INDEL};
+use crate::output::{write_variant_row, write_header};
 
 // NOTE: For now the algorithm only parses inputs which have a single chromosome only
 // This is temporary depending on how we want to multithread
@@ -15,14 +15,23 @@ pub fn parse_region(
     reads_path: &Path,
     csv_path: &str,
     sample: Option<&str>,
-    // FOR TEMP HEADER FIX
+    label: Option<&str>,
     varclass: &VarClass,
-    //
     fasta_path: Option<&Path>,
+    // ADD vector of [chrom/first variant index/length] here
 ) -> Result<(), Box<dyn std::error::Error>> {
     let file_type = detect_file_type(reads_path)
         .with_context(|| format!("Failed to detect file type for {}", reads_path.display()))?;
     
+    let mut csv_writer = WriterBuilder::new()
+        .has_headers(false)
+        .from_path(csv_path)?;
+
+    // Write dynamic header based on BAM/CRAM filename
+    write_header(&mut csv_writer, &reads_path, label, &varclass)?;
+
+    // ADD LOOP FOR CHROM HERE 
+
     // Get min/max position of variants in a given chromosome 
     //  to fetch only reads that are in this region
     // NOTE: This assumes that the variants are of only one chromosome
@@ -45,15 +54,6 @@ pub fn parse_region(
     };
 
     reader.fetch((&region_chrom, min_pos - 1, max_pos))?;
-
-    let mut csv_writer = Writer::from_path(csv_path)?;
-
-    // TEMP HEADER CSV FIX
-    match varclass {
-        VarClass::Snv =>  csv_writer.write_record(CSV_HEADER_SNV)?,
-        VarClass::Indel =>  csv_writer.write_record(CSV_HEADER_INDEL)?,
-    }
-    //
 
     let ref_seq_len = get_ref_len(&reader, &region_chrom)?;
 

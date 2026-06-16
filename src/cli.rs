@@ -28,6 +28,10 @@ pub struct Cli {
     #[arg(long)]
     pub sample: Option<String>,
 
+    /// Optional label for bam files (if not provided will default to name of bam file)
+    #[arg(long)]
+    pub label: Option<String>,
+
     /// Required for CRAM: Filepath of FASTA file associated with CRAM file
     #[arg(long)]
     pub fasta_file: Option<PathBuf>,

@@ -1,12 +1,53 @@
 use std::fs::File;
+use std::path::Path;
 use csv::Writer;
 use serde::Serialize;
 use std::error::Error;
+use anyhow::{Context, Result};
 
 use crate::Variant;
 use crate::features::{LocusFeatures, NormalizedLocusFeaturesRow};
+use crate::variant::VarClass;
 
-// NOTE: SERDE NO LONGER WRITING HEADER BECAUSE OF NESTED: THINK OF FIX
+pub fn write_header(
+    writer: &mut Writer<File>,
+    reads_path: &Path,
+    label: Option<&str>,
+    varclass: &VarClass,
+) -> Result<()> {
+    let label_prefix = match label {
+        Some(label) => format!("{label} "),
+        None => {
+            let file_name = reads_path
+                .file_name()
+                .context("Invalid or missing file name")?
+                .to_str()
+                .context("File name contains invalid UTF-8")?;
+
+            format!("{file_name} ")
+        }
+    };
+
+    let dynamic_headers = match varclass {
+        VarClass::Snv => HEADER_FIELDS_SNV,
+        VarClass::Indel => HEADER_FIELDS_INDEL,
+    };
+
+    let labelled_dynamic: Vec<String> = dynamic_headers
+        .iter()
+        .map(|col| format!("{label_prefix}{col}"))
+        .collect();
+
+    writer.write_record(
+        HEADER_FIELDS_SHARED
+            .iter()
+            .copied()
+            .chain(labelled_dynamic.iter().map(String::as_str)),
+    )?;
+
+    Ok(())
+}
+
 pub fn write_variant_row(
     writer: &mut Writer<File>,
     var: &Variant,
@@ -14,6 +55,7 @@ pub fn write_variant_row(
     sample: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
     writer.serialize(OutputRow::from_variant(var, pos_fraction, sample))?;
+
     Ok(())
 }
 
@@ -217,8 +259,8 @@ impl<'a> OutputRowINDEL<'a> {
     }
 }
 
-// TEMP HEADER FIX
-pub const CSV_HEADER_SNV: &[&str] = &[
+// Header fields
+const HEADER_FIELDS_SHARED: &[&str] = &[
     "chrom",
     "pos",
     "ref",
@@ -226,6 +268,9 @@ pub const CSV_HEADER_SNV: &[&str] = &[
     "vartype",
     "pos_normalised",
     "sample",
+];
+
+const HEADER_FIELDS_SNV: &[&str] = &[
     "depth",
     "count_a",
     "count_t",
@@ -267,14 +312,7 @@ pub const CSV_HEADER_SNV: &[&str] = &[
     "all_normalised_read_position",
 ];
 
-pub const CSV_HEADER_INDEL: &[&str] = &[
-    "chrom",
-    "pos",
-    "ref",
-    "alt",
-    "vartype",
-    "pos_normalised",
-    "sample",
+const HEADER_FIELDS_INDEL: &[&str] = &[
     "depth",
     "ref_count",
     "alt_count",
@@ -312,4 +350,3 @@ pub const CSV_HEADER_INDEL: &[&str] = &[
     "all_supplementary",
     "all_normalised_read_position",
 ];
-//

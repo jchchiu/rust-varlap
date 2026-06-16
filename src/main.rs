@@ -25,7 +25,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &mut variants, 
         &args.bam_file, 
         &args.csv_path, 
-        args.sample.as_deref(), 
+        args.sample.as_deref(),
+        args.label.as_deref(), 
         &args.varclass, 
         args.fasta_file.as_deref()
     )?;
