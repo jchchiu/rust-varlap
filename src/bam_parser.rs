@@ -35,8 +35,8 @@ pub fn parse_region(
     // Get min/max position of variants in a given chromosome 
     //  to fetch only reads that are in this region
     // NOTE: This assumes that the variants are of only one chromosome
-    let (region_chrom, min_pos, max_pos) = 
-        get_vcf_min_max(&variants).ok_or("Could not determine VCF min/max")?;
+    let chrom_info = get_chrom_info(&variants)
+        .ok_or("Could not determine chromosome min/max")?;
 
     let mut reader = IndexedReader::from_path(reads_path)?;
 
@@ -53,9 +53,9 @@ pub fn parse_region(
         },
     };
 
-    reader.fetch((&region_chrom, min_pos - 1, max_pos))?;
+    reader.fetch((&chrom_info.chrom, chrom_info.min_pos - 1, chrom_info.max_pos))?;
 
-    let ref_seq_len = get_ref_len(&reader, &region_chrom)?;
+    let ref_seq_len = get_ref_len(&reader, &chrom_info.chrom)?;
 
     for read_result in reader.rc_records() {
         let record = read_result?;
@@ -122,15 +122,22 @@ fn detect_file_type(path: &Path) -> Result<FileType> {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ChromInfo {
+    chrom: String,
+    min_pos: u64,
+    max_pos: u64,
+}
+
 // NOTE: This assumes that the variants from only one chromosome
-fn get_vcf_min_max(variants: &VecDeque<Variant>) -> Option<(String, u64, u64)> {
+fn get_chrom_info(variants: &VecDeque<Variant>) -> Option<ChromInfo> {
     let first = variants.front()?;
-    let chrom = first.chrom.clone();
 
-    let min_pos = first.pos;
-    let max_pos = variants.back()?.pos;
-
-    Some((chrom, min_pos, max_pos))
+    Some(ChromInfo {
+        chrom: first.chrom.clone(),
+        min_pos: first.pos,
+        max_pos: variants.back()?.pos,
+    })
 }
 
 fn get_ref_len(
