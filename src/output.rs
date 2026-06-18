@@ -5,9 +5,8 @@ use serde::Serialize;
 use std::error::Error;
 use anyhow::{Context, Result};
 
-use crate::Variant;
 use crate::features::{LocusFeatures, NormalizedLocusFeaturesRow};
-use crate::variant::VarClass;
+use crate::variant::{Variant, VarClass};
 
 pub fn write_header(
     writer: &mut Writer<File>,

@@ -5,13 +5,13 @@ use csv::{WriterBuilder};
 use rust_htslib::bam::{Read, IndexedReader, Record};
 use anyhow::{Context, Result, bail};
 
-use crate::variant::{Variant, VarClass};
+use crate::variant::{Variant, VarClass, ParsedVariants};
 use crate::output::{write_variant_row, write_header};
 
 // NOTE: For now the algorithm only parses inputs which have a single chromosome only
 // This is temporary depending on how we want to multithread
 pub fn parse_region(
-    variants: &mut VecDeque<Variant>,
+    parsed_variants: &mut ParsedVariants,
     reads_path: &Path,
     csv_path: &str,
     sample: Option<&str>,
@@ -30,14 +30,6 @@ pub fn parse_region(
     // Write dynamic header based on BAM/CRAM filename
     write_header(&mut csv_writer, &reads_path, label, &varclass)?;
 
-    // ADD LOOP FOR CHROM HERE 
-
-    // Get min/max position of variants in a given chromosome 
-    //  to fetch only reads that are in this region
-    // NOTE: This assumes that the variants are of only one chromosome
-    let chrom_info = get_chrom_info(&variants)
-        .ok_or("Could not determine chromosome min/max")?;
-
     let mut reader = IndexedReader::from_path(reads_path)?;
 
     match file_type {
@@ -53,54 +45,78 @@ pub fn parse_region(
         },
     };
 
-    reader.fetch((&chrom_info.chrom, chrom_info.min_pos - 1, chrom_info.max_pos))?;
+    // ADD LOOP FOR CHROM HERE 
+    // Since chrom/variants in sorted order
+    // start of chrom in queue should be 0 as first entry should be first instance of variant for a chromosome
+    // end of chrom in queue should be the variant count
+    // therefore we should only iterate over [0 .. variant_count]
+    for chrom in &parsed_variants.chroms{
+        while !parsed_variants.variants.is_empty(){
 
-    let ref_seq_len = get_ref_len(&reader, &chrom_info.chrom)?;
+            println!("---------------------------------------------");
 
-    for read_result in reader.rc_records() {
-        let record = read_result?;
-        
-        if skip_read_check(&record) {
-            continue;
-        }
+            println!("{:?}", &parsed_variants.variants);
 
-        let read_start = record.pos() as u64;
+            println!("{:?}", &parsed_variants.chroms);
 
-        loop {
-            let should_pop = match variants.front() {
-                Some(var) => (read_start + 1) > var.pos,
-                None => false,
-            };
+            // Get min/max position of variants in a given chromosome 
+            //  to fetch only reads that are in this region
+            // NOTE: This assumes that the variants are of only one chromosome
+            let chrom_info = get_chrom_info(&parsed_variants.variants, chrom.variant_count)
+                .ok_or("Could not determine chromosome min/max")?;
 
-            if should_pop {
-                if let Some(var) = variants.pop_front() {
-                    let pos_fraction = var.get_pos_fraction(ref_seq_len);
-                    write_variant_row(&mut csv_writer, &var, pos_fraction, sample)?;
+            println!("{:?}", &chrom_info);
+
+            reader.fetch((&chrom.chrom, chrom_info.min_pos - 1, chrom_info.max_pos))?;
+
+            let ref_seq_len = get_ref_len(&reader, &chrom.chrom)?;
+
+            for read_result in reader.rc_records() {
+                let record = read_result?;
+                
+                if skip_read_check(&record) {
+                    continue;
                 }
-            } else {
-                break;
-            }
-        }
 
-        for var in &mut *variants {
-            let zero_based_pos = var.pos - 1;
-            let read_end = record.cigar().end_pos() as u64;
+                let read_start = record.pos() as u64;
 
-            if zero_based_pos >= read_start && zero_based_pos < read_end {
-                var.count_locus_features(&record, zero_based_pos);
-            } else {
-                break;
+                loop {
+                    let should_pop = match parsed_variants.variants.front() {
+                        Some(var) => (read_start + 1) > var.pos,
+                        None => false,
+                    };
+
+                    if should_pop {
+                        if let Some(var) = parsed_variants.variants.pop_front() {
+                            let pos_fraction = var.get_pos_fraction(ref_seq_len);
+                            write_variant_row(&mut csv_writer, &var, pos_fraction, sample)?;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                for var in &mut parsed_variants.variants {
+                    let zero_based_pos = var.pos - 1;
+                    let read_end = record.cigar().end_pos() as u64;
+
+                    if zero_based_pos >= read_start && zero_based_pos < read_end {
+                        var.count_locus_features(&record, zero_based_pos);
+                    } else {
+                        break;
+                    }
+                }
             }
+
+            while let Some(var) = parsed_variants.variants.pop_front() {
+                let pos_fraction = var.get_pos_fraction(ref_seq_len);
+                write_variant_row(&mut csv_writer, &var, pos_fraction, sample)?;
+            }
+            csv_writer.flush()?;
         }
     }
 
-    while let Some(var) = variants.pop_front() {
-        let pos_fraction = var.get_pos_fraction(ref_seq_len);
-        write_variant_row(&mut csv_writer, &var, pos_fraction, sample)?;
-    }
-    csv_writer.flush()?;
-
-    Ok(()) 
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -124,19 +140,19 @@ fn detect_file_type(path: &Path) -> Result<FileType> {
 
 #[derive(Debug, Clone)]
 struct ChromInfo {
-    chrom: String,
     min_pos: u64,
     max_pos: u64,
 }
 
 // NOTE: This assumes that the variants from only one chromosome
-fn get_chrom_info(variants: &VecDeque<Variant>) -> Option<ChromInfo> {
+fn get_chrom_info(variants: &VecDeque<Variant>, chrom_count: usize) -> Option<ChromInfo> {
     let first = variants.front()?;
 
+    let last = variants.get(chrom_count - 1)?;
+
     Some(ChromInfo {
-        chrom: first.chrom.clone(),
         min_pos: first.pos,
-        max_pos: variants.back()?.pos,
+        max_pos: last.pos,
     })
 }
 
