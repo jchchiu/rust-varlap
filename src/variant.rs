@@ -95,13 +95,12 @@ impl VarType {
 }
 
 #[derive(Debug, Clone)]
-pub struct ChromStats {
+pub struct ChromBucket {
     pub chrom: String,
-    pub variant_count: usize,
+    pub variants: VecDeque<Variant>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ParsedVariants  {
-    pub chroms: Vec<ChromStats>,
-    pub variants: VecDeque<Variant>,
+    pub chroms: Vec<ChromBucket>,
 }
