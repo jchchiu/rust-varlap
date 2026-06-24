@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     bam_parser::parse_region(
         &mut parsed_variants, 
         &args.bam_file, 
-        &args.csv_path, 
+        &args.output_path, 
         args.sample.as_deref(),
         args.label.as_deref(), 
         &args.varclass, 
