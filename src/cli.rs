@@ -21,15 +21,19 @@ pub struct Cli {
     pub varclass: VarClass,
 
     /// Filepath of where csv output should be stored
-    #[arg(short = 'o', long)]
-    pub csv_path: String,
+    #[arg(short, long)]
+    pub output_path: String,
 
     /// Optional sample identifier
     #[arg(long)]
     pub sample: Option<String>,
 
-    /// Required for CRAM: Filepath of FASTA file associated with CRAM file
+    /// Optional label for bam files (if not provided will default to name of bam file)
     #[arg(long)]
+    pub label: Option<String>,
+
+    /// Required for CRAM: Filepath of FASTA file associated with CRAM file
+    #[arg(short, long)]
     pub fasta_file: Option<PathBuf>,
 }
 

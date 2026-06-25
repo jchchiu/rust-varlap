@@ -2,6 +2,7 @@ use clap::ValueEnum;
 use crate::features::{LocusFeatures, NormalizedLocusFeaturesRow, AlleleCountsSnvStats, AlleleCountsIndelStats};
 use std::rc::Rc;
 use rust_htslib::bam::{Record};
+use std::collections::VecDeque;
 
 // NOTE: 
 // If we want to process multiple BAMs, we should move the features out
@@ -91,4 +92,15 @@ impl VarType {
             VarType::Unknown => "UNKNOWN",            
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ChromBucket {
+    pub chrom: String,
+    pub variants: VecDeque<Variant>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParsedVariants  {
+    pub chroms: Vec<ChromBucket>,
 }

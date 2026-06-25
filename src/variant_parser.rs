@@ -8,10 +8,9 @@ use flate2::read::MultiGzDecoder;
 use log::{debug, info, warn};
 
 use crate::features::{LocusFeatures, LocusFeaturesIndel, LocusFeaturesSnv};
-use crate::variant::{VarClass, VarType};
-use crate::Variant;
+use crate::variant::{Variant, VarClass, VarType, ChromBucket, ParsedVariants};
 
-pub fn parse(file_path: &Path, varclass: &VarClass) -> Result<VecDeque<Variant>> {
+pub fn parse(file_path: &Path, varclass: &VarClass) -> Result<ParsedVariants> {
     let file_type = detect_file_type(file_path)
         .with_context(|| format!("Failed to detect file type for {}", file_path.display()))?;
 
@@ -24,7 +23,9 @@ pub fn parse(file_path: &Path, varclass: &VarClass) -> Result<VecDeque<Variant>>
         file_type
     );
 
-    let mut variants = VecDeque::new();
+    // let mut variants = VecDeque::new();
+
+    let mut buckets: Vec<ChromBucket> = Vec::new();
 
     for (line_no, line_result) in reader.lines().enumerate() {
         let line = line_result.with_context(|| {
@@ -83,8 +84,22 @@ pub fn parse(file_path: &Path, varclass: &VarClass) -> Result<VecDeque<Variant>>
                         features: LocusFeatures::Indel(LocusFeaturesIndel::default()),
                     },
                 };
+                // variants.push_back(variant);
 
-                variants.push_back(variant);
+                // Get unique chromosomes and their counts for variants addded to queue
+                // NOTE: Variants file MUST be in sorted ascending order
+                // We do not need to get the index as we are popping the queue when iterating over variants
+                if let Some(last) = buckets.last_mut() {
+                    if last.chrom == chrom {
+                        last.variants.push_back(variant);
+                        continue;
+                    }
+                }
+
+                buckets.push(ChromBucket {
+                    chrom: chrom.clone(),
+                    variants: VecDeque::from([variant]),
+                });
             } else {
                 debug!(
                     "Skipped invalid variant at line {}: chrom={} pos={} ref={} alt={}",
@@ -98,8 +113,8 @@ pub fn parse(file_path: &Path, varclass: &VarClass) -> Result<VecDeque<Variant>>
         }
     }
 
-    info!("Parsed {} variants from {}", variants.len(), file_path.display());
-    Ok(variants)
+    // info!("Parsed {} variants from {}", variants.len(), file_path.display());
+    Ok(ParsedVariants { chroms: buckets })
 }
 
 #[derive(Debug, Clone, Copy)]
