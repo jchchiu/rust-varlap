@@ -14,16 +14,16 @@ fn run() -> Result<()> {
     let args = cli::parse();
 
     let mut parsed_variants = 
-        variant_parser::parse(&args.variant_file, &args.varclass)?;
+        variant_parser::parse(&args.variants, &args.varclass)?;
 
     bam_parser::parse_region(
         &mut parsed_variants, 
-        &args.bam_file, 
-        &args.output_path, 
+        &args.reads, 
+        &args.output, 
         args.sample.as_deref(),
         args.label.as_deref(), 
         &args.varclass, 
-        args.fasta_file.as_deref()
+        args.fasta.as_deref()
     )?;
 
     Ok(())

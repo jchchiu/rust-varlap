@@ -5,28 +5,28 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use flate2::read::MultiGzDecoder;
-use log::{debug, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::errors::AppError;
 use crate::features::{LocusFeatures, LocusFeaturesIndel, LocusFeaturesSnv};
 use crate::variant::{Variant, VarClass, VarType, ChromBucket, ParsedVariants};
 
-pub fn parse(file_path: &Path, varclass: &VarClass) -> Result<ParsedVariants> {
-    let file_type = detect_file_type(file_path)
+pub fn parse(variants_path: &Path, varclass: &VarClass) -> Result<ParsedVariants> {
+    let file_type = detect_file_type(variants_path)
         .with_context(||
             format!(
                 "Failed to detect variants file type for '{}'",
-                file_path.display()
+                variants_path.display()
             )
         )?;
 
-    let reader = check_valid_gzip(file_path)
+    let reader = check_valid_gzip(variants_path)
         .with_context(||
-            format!("Failed to open reader for {}", file_path.display()))?;
+            format!("Failed to open reader for {}", variants_path.display()))?;
 
     info!(
         "Parsing variants from {} as {:?}",
-        file_path.display(),
+        variants_path.display(),
         file_type
     );
 
@@ -36,7 +36,7 @@ pub fn parse(file_path: &Path, varclass: &VarClass) -> Result<ParsedVariants> {
 
     for (line_no, line_result) in reader.lines().enumerate() {
         let line = line_result.with_context(|| {
-            format!("Failed reading line {} from {}", line_no + 1, file_path.display())
+            format!("Failed reading line {} from {}", line_no + 1, variants_path.display())
         })?;
 
         if line.starts_with('#') {
@@ -120,7 +120,7 @@ pub fn parse(file_path: &Path, varclass: &VarClass) -> Result<ParsedVariants> {
         }
     }
 
-    // info!("Parsed {} variants from {}", variants.len(), file_path.display());
+    // info!("Parsed {} variants from {}", variants.len(), variants_path.display());
     Ok(ParsedVariants { chroms: buckets })
 }
 
