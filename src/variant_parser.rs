@@ -3,19 +3,26 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use flate2::read::MultiGzDecoder;
 use log::{debug, info, warn};
 
 use crate::features::{LocusFeatures, LocusFeaturesIndel, LocusFeaturesSnv};
 use crate::variant::{Variant, VarClass, VarType, ChromBucket, ParsedVariants};
+use crate::errors::AppError;
 
 pub fn parse(file_path: &Path, varclass: &VarClass) -> Result<ParsedVariants> {
     let file_type = detect_file_type(file_path)
-        .with_context(|| format!("Failed to detect file type for {}", file_path.display()))?;
+        .with_context(||
+            format!(
+                "Failed to detect variants file type for '{}'",
+                file_path.display()
+            )
+        )?;
 
     let reader = check_valid_gzip(file_path)
-        .with_context(|| format!("Failed to open reader for {}", file_path.display()))?;
+        .with_context(||
+            format!("Failed to open reader for {}", file_path.display()))?;
 
     info!(
         "Parsing variants from {} as {:?}",
@@ -124,17 +131,21 @@ enum FileType {
     Tsv,
 }
 
-fn detect_file_type(path: &Path) -> Result<FileType> {
+fn detect_file_type(path: &Path) -> Result<FileType, AppError> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
-        .context("Missing file extension")?;
+        .ok_or_else(|| AppError::MissingExtension {
+            filename: path.to_path_buf(),
+        })?;
 
     let actual_ext = if ext == "gz" {
         path.file_stem()
             .and_then(|s| Path::new(s).extension())
             .and_then(|e| e.to_str())
-            .context("Invalid gzipped filename; expected something like .vcf.gz")?
+            .ok_or_else(|| AppError::InvalidGzipName {
+                filename: path.to_path_buf(),
+            })?
     } else {
         ext
     };
@@ -143,7 +154,10 @@ fn detect_file_type(path: &Path) -> Result<FileType> {
         "vcf" => Ok(FileType::Vcf),
         "csv" => Ok(FileType::Csv),
         "tsv" => Ok(FileType::Tsv),
-        _ => bail!("Unsupported file format: {}", actual_ext),
+        _ => Err(AppError::UnsupportedVariantsFormat {
+            filename: path.to_path_buf(),
+            extension: actual_ext.to_string(),
+        }),
     }
 }
 
