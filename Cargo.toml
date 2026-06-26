@@ -8,7 +8,7 @@ anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }
 csv = "1.4.0"
 flate2 = "1.1.9"
-log = "0.4.30"
 rust-htslib = "1.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"
+tracing = "0.1.44"
