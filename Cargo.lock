@@ -778,6 +778,7 @@ dependencies = [
  "log",
  "rust-htslib",
  "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

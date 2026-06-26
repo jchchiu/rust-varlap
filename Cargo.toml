@@ -11,3 +11,4 @@ flate2 = "1.1.9"
 log = "0.4.30"
 rust-htslib = "1.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
+thiserror = "2.0.18"
