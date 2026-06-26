@@ -9,15 +9,15 @@ use crate::variant::VarClass;
 #[command(version = "0.0.1")]
 #[command(about = "Quality control tool for genetic variants")]
 pub struct Cli {
-    /// Input variant file path (can be vcf, csv, tsv and be gzipped (.gz))
+    /// Filepath of variants (Supported: vcf, vcf.gz, csv, tsv)
     #[arg(short, long)]
     pub variants: PathBuf,
 
-    /// Filepaths of read files (can be bam or cram)
+    /// Filepath of reads (Supported: bam, cram)
     #[arg(short, long)]
     pub reads: PathBuf,
 
-    /// Type of variants to consider. Options: snv, indel
+    /// Class of variants to consider for analysis (Options: snv, indel)
     #[arg(long, value_enum)]
     pub varclass: VarClass,
 
@@ -29,11 +29,11 @@ pub struct Cli {
     #[arg(long)]
     pub sample: Option<String>,
 
-    /// Optional label for bam files (if not provided will default to name of bam file)
+    /// Optional label for reads file (if not provided will default to name of reads file)
     #[arg(long)]
     pub label: Option<String>,
 
-    /// Required for CRAM: Filepath of FASTA file associated with CRAM file
+    /// Filepath of FASTA file associated with CRAM file (Required if reads is CRAM)
     #[arg(short, long)]
     pub fasta: Option<PathBuf>,
 }

@@ -544,8 +544,6 @@ pub struct NormalizedLocusFeaturesRow {
     pub all_normalised_read_position: Option<f64>,
 }
 
-// Use option or not? Because in python script if there are no values it defaults to ''
-// Compared to default which would initialize it as 0.0
 #[derive(Debug, Clone, Copy, Default, serde::Serialize)]
 pub struct NormalizedReadFeatures {
     pub nm: Option<f64>,

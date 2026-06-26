@@ -94,7 +94,7 @@ pub fn parse(variants_path: &Path, varclass: &VarClass) -> Result<ParsedVariants
                 // variants.push_back(variant);
 
                 // Get unique chromosomes and their counts for variants addded to queue
-                // NOTE: Variants file MUST be in sorted ascending order
+                // NOTE: Variants file MUST be sorted in ascending order
                 // We do not need to get the index as we are popping the queue when iterating over variants
                 if let Some(last) = buckets.last_mut() {
                     if last.chrom == chrom {
@@ -135,7 +135,7 @@ fn detect_file_type(path: &Path) -> Result<FileType, AppError> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
-        .ok_or_else(|| AppError::MissingExtension {
+        .ok_or_else(|| AppError::MissingVariantsExtension {
             filename: path.to_path_buf(),
         })?;
 

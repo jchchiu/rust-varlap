@@ -16,8 +16,13 @@ pub enum AppError {
         extension: String,
     },
 
-    #[error("missing file extension")]
-    MissingExtension {
+    #[error("missing variants file extension")]
+    MissingVariantsExtension {
+        filename: PathBuf,
+    },
+
+    #[error("missing reads file extension")]
+    MissingReadsExtension {
         filename: PathBuf,
     },
 
@@ -29,8 +34,10 @@ pub enum AppError {
     #[error("CRAM file requires a reference FASTA")]
     MissingCramReference,
 
-    #[error("I/O error")]
-    Io(#[from] std::io::Error),
+    #[error("reference sequence not found")]
+    MissingReferenceSequence {
+        chromosome: String,
+    },
 }
 
 impl AppError {
@@ -40,12 +47,13 @@ impl AppError {
     //  3: File format error
     pub fn exit_code(&self) -> i32 {
         match self {
-            AppError::Io(_) => 1,
             AppError::UnsupportedVariantsFormat  { .. } => 3,
             AppError::UnsupportedReadsFormat  { .. } => 3,
-            AppError::MissingExtension { .. } => 3,
+            AppError::MissingVariantsExtension { .. } => 3,
+            AppError::MissingReadsExtension { .. } => 3,
             AppError::InvalidGzipName { .. } => 3,
             AppError::MissingCramReference => 3,
+            AppError::MissingReferenceSequence { .. } => 3,
         }
     }
 }
@@ -56,7 +64,7 @@ pub fn print_error(program: &str, err: &AppError) {
             filename,
             extension,
         } => {
-            eprintln!("{program} ERROR: unsupported file format");
+            eprintln!("{program} ERROR: unsupported variants file format");
             eprintln!("Input file: {}", filename.display());
             eprintln!("Detected extension: {extension}");
             eprintln!("Supported formats are:");
@@ -70,7 +78,7 @@ pub fn print_error(program: &str, err: &AppError) {
             filename,
             extension,
         } => {
-            eprintln!("{program} ERROR: unsupported file format");
+            eprintln!("{program} ERROR: unsupported reads file format");
             eprintln!("Input file: {}", filename.display());
             eprintln!("Detected extension: {extension}");
             eprintln!("Supported formats are:");
@@ -78,14 +86,22 @@ pub fn print_error(program: &str, err: &AppError) {
             eprintln!("  .cram");
         }
 
-        AppError::MissingExtension { filename } => {
-            eprintln!("{program} ERROR: missing file extension");
+        AppError::MissingVariantsExtension { filename } => {
+            eprintln!("{program} ERROR: variants missing file extension");
             eprintln!("Input file: {}", filename.display());
-            // eprintln!("Expected one of:");
-            // eprintln!("  .vcf");
-            // eprintln!("  .vcf.gz");
-            // eprintln!("  .csv");
-            // eprintln!("  .tsv");
+            eprintln!("Expected one of:");
+            eprintln!("  .vcf");
+            eprintln!("  .vcf.gz");
+            eprintln!("  .csv");
+            eprintln!("  .tsv");
+        }
+
+        AppError::MissingReadsExtension { filename } => {
+            eprintln!("{program} ERROR: reads missing file extension");
+            eprintln!("Input file: {}", filename.display());
+            eprintln!("Expected one of:");
+            eprintln!("  .bam");
+            eprintln!("  .cram");
         }
 
         AppError::InvalidGzipName { filename } => {
@@ -97,13 +113,15 @@ pub fn print_error(program: &str, err: &AppError) {
 
         AppError::MissingCramReference => {
             eprintln!("{program} ERROR: missing reference FASTA");
-            eprintln!("CRAM files require a reference FASTA.");
-            eprintln!("Specify one with --fasta-file <FASTA>.");
+            eprintln!("CRAM files require the exact reference FASTA that was used for it's creation.");
+            eprintln!("Specify one with --fasta <FASTA>.");
         }
 
-        AppError::Io(err) => {
-            eprintln!("{program} ERROR: file I/O error");
-            eprintln!("{err}");
+        AppError::MissingReferenceSequence { chromosome } => {
+            eprintln!("{program} ERROR: reference sequence not found");
+            eprintln!("Chromosome: {}", chromosome);
+            eprintln!("The alignment file does not contain this reference sequence.");
+            eprintln!("Check that the BAM/CRAM and variant file use the same reference genome.");
         }
     }
 }

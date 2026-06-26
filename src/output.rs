@@ -4,7 +4,6 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use csv::Writer;
 use serde::Serialize;
-use std::error::Error;
 
 use crate::features::{LocusFeatures, NormalizedLocusFeaturesRow};
 use crate::variant::{Variant, VarClass};
@@ -41,7 +40,8 @@ pub fn write_header(
             .iter()
             .copied()
             .chain(labelled_dynamic.iter().map(String::as_str)),
-    )?;
+    )
+    .context("Failed to write CSV header")?;
 
     Ok(())
 }
@@ -51,8 +51,14 @@ pub fn write_variant_row(
     var: &Variant,
     pos_fraction: f64,
     sample: Option<&str>,
-) -> Result<(), Box<dyn Error>> {
-    writer.serialize(OutputRow::from_variant(var, pos_fraction, sample))?;
+) -> Result<()> {
+    writer.serialize(OutputRow::from_variant(var, pos_fraction, sample))
+        .with_context(||
+            format!(
+                "Failed to write variant '{}:{}' to output CSV",
+                var.chrom, var.pos
+            )
+        )?;
 
     Ok(())
 }
@@ -151,7 +157,6 @@ impl<'a> OutputRow<'a> {
 struct OutputRowSNV<'a> {
     chrom: &'a str,
     pos: u64,
-    #[serde(rename = "ref")]
     refr: &'a str,
     alt: &'a str,
     vartype: &'a str,
@@ -172,7 +177,6 @@ struct OutputRowSNV<'a> {
     read_features: OutputReadFeatures,
 }
 
-// Make branching for snv/indel; make common function for read_features
 impl<'a> OutputRowSNV<'a> {
     fn from_variant(var: &'a Variant, pos_fraction: f64, sample: Option<&'a str>) -> Self {
         let bcs = var.base_counts_stats().expect("Could not get base count statistics.");
@@ -212,7 +216,6 @@ impl<'a> OutputRowSNV<'a> {
 struct OutputRowINDEL<'a> {
     chrom: &'a str,
     pos: u64,
-    #[serde(rename = "ref")]
     refr: &'a str,
     alt: &'a str,
     vartype: &'a str,
@@ -229,7 +232,6 @@ struct OutputRowINDEL<'a> {
     read_features: OutputReadFeatures,
 }
 
-// Make branching for snv/indel; make common function for read_features
 impl<'a> OutputRowINDEL<'a> {
     fn from_variant(var: &'a Variant, pos_fraction: f64, sample: Option<&'a str>) -> Self {
         let read_features = OutputReadFeatures::from(var.normalized_row());
