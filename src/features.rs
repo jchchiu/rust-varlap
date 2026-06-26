@@ -1,9 +1,9 @@
-use std::rc::Rc;
 use std::cmp;
+use std::rc::Rc;
 
-use serde::Serialize;
 use rust_htslib::bam::Record;
 use rust_htslib::bam::record::{Aux, Cigar};
+use serde::Serialize;
 
 use crate::variant::VarType;
 

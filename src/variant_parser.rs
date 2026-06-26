@@ -7,9 +7,9 @@ use anyhow::{Context, Result};
 use flate2::read::MultiGzDecoder;
 use log::{debug, info, warn};
 
+use crate::errors::AppError;
 use crate::features::{LocusFeatures, LocusFeaturesIndel, LocusFeaturesSnv};
 use crate::variant::{Variant, VarClass, VarType, ChromBucket, ParsedVariants};
-use crate::errors::AppError;
 
 pub fn parse(file_path: &Path, varclass: &VarClass) -> Result<ParsedVariants> {
     let file_type = detect_file_type(file_path)
@@ -186,17 +186,17 @@ const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 
 fn check_valid_gzip(file_path: &Path) -> Result<Box<dyn BufRead>> {
     let mut file = File::open(file_path)
-        .with_context(|| format!("failed to open file {}", file_path.display()))?;
+        .with_context(|| format!("Failed to open variants file '{}'", file_path.display()))?;
 
     // Read the first two bytes to check for gzip magic number
     let mut magic = [0u8; 2];
     let bytes_read = file
         .read(&mut magic)
-        .with_context(|| format!("Failed to read header from {}", file_path.display()))?;
+        .with_context(|| format!("Failed to read header from '{}'", file_path.display()))?;
 
     // Seek back to the beginning so the reader starts from byte 0
     file.seek(SeekFrom::Start(0))
-        .with_context(|| format!("Failed to reseek start of file {}", file_path.display()))?;
+        .with_context(|| format!("Failed to reseek start of file '{}'", file_path.display()))?;
 
     if bytes_read >= 2 && magic == GZIP_MAGIC {
         debug!("Detected gzip-compressed input: {}", file_path.display());

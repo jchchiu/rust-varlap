@@ -1,9 +1,10 @@
 use std::fs::File;
 use std::path::Path;
+
+use anyhow::{Context, Result};
 use csv::Writer;
 use serde::Serialize;
 use std::error::Error;
-use anyhow::{Context, Result};
 
 use crate::features::{LocusFeatures, NormalizedLocusFeaturesRow};
 use crate::variant::{Variant, VarClass};

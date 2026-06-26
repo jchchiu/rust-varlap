@@ -1,8 +1,10 @@
-use clap::ValueEnum;
-use crate::features::{LocusFeatures, NormalizedLocusFeaturesRow, AlleleCountsSnvStats, AlleleCountsIndelStats};
-use std::rc::Rc;
-use rust_htslib::bam::{Record};
 use std::collections::VecDeque;
+use std::rc::Rc;
+
+use clap::ValueEnum;
+use rust_htslib::bam::{Record};
+
+use crate::features::{LocusFeatures, NormalizedLocusFeaturesRow, AlleleCountsSnvStats, AlleleCountsIndelStats};
 
 // NOTE: 
 // If we want to process multiple BAMs, we should move the features out

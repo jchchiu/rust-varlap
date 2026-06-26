@@ -1,10 +1,10 @@
-mod cli;
-mod variant_parser;
-mod variant;
-mod features;
 mod bam_parser;
-mod output;
+mod cli;
 mod errors;
+mod features;
+mod output;
+mod variant;
+mod variant_parser;
 
 use anyhow::Result;
 
