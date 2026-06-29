@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::rc::Rc;
 
 use clap::ValueEnum;
 use rust_htslib::bam::{Record};
@@ -38,7 +37,7 @@ impl Variant {
         }
     }
 
-    pub fn count_locus_features(&mut self, read: &Rc<Record>, ref_pos: u64) {
+    pub fn count_locus_features(&mut self, read: &Record, ref_pos: u64) {
         let qpos = self.ref_pos_to_query_pos(read, ref_pos);
 
         match &mut self.features {

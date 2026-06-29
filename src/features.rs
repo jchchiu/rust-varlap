@@ -1,5 +1,4 @@
 use std::cmp;
-use std::rc::Rc;
 
 use rust_htslib::bam::Record;
 use rust_htslib::bam::record::{Aux, Cigar};
@@ -81,7 +80,7 @@ pub struct LocusFeaturesSnv {
 impl LocusFeaturesSnv {
     pub fn count(
         &mut self,
-        read: &Rc<Record>,
+        read: &Record,
         refr: char,
         alt: char,
         query_pos: Option<u32>,
@@ -108,7 +107,7 @@ impl LocusFeaturesSnv {
             }
         }
 
-        self.common.all_read_features.count(&read, query_pos);
+        self.common.all_read_features.count(read, query_pos);
     }
 }
 
@@ -129,7 +128,7 @@ pub struct LocusFeaturesIndel {
 impl LocusFeaturesIndel {
     pub fn count(
         &mut self,
-        read: &Rc<Record>,
+        read: &Record,
         refr: &str,
         alt: &str,
         ref_pos: u64,
@@ -143,25 +142,16 @@ impl LocusFeaturesIndel {
         let overlapping_indels = self.indels_overlapping_variant(&read, start, end);
         self.overlapping_indels_count += overlapping_indels.len() as u64;
 
-        let mut read_supports_alt = false;
-
-        let bases = match indel_type {
-            VarType::Del => Some(String::new()),
-            VarType::Ins => Some(alt[1..].to_string()),
-            _ => None,
-        };
-
-        for event in overlapping_indels.iter() {
-            if event.indel_type == *indel_type {
-                if (event.start == start) && (event.end == end) {
-                    if matches!(indel_type, VarType::Del) ||           // FIX UNWRAP HERE
-                    (matches!(indel_type, VarType::Ins) && event.bases == bases.clone().unwrap()) {
-                        read_supports_alt = true;
-                        break;
-                    }
+        let read_supports_alt = overlapping_indels.iter().any(|event| {
+            event.indel_type == *indel_type
+                && event.start == start
+                && event.end == end
+                && match indel_type {
+                    VarType::Del => true,
+                    VarType::Ins => event.bases == &alt[1..],
+                    _ => false,
                 }
-            }
-        }
+        });
 
         let mut read_supports_ref = false;
         if overlapping_indels.is_empty() && let Some(qpos) = query_pos {
@@ -175,7 +165,7 @@ impl LocusFeaturesIndel {
                 VarType::Del => {
                     // TEMP FIX: In python if string slice is out of bounds then it 
                     // truncates end value to length of vector
-                    // NOTE: MAY NEED TO REWRITE THIS PART; ALSO HOW WE GET QPOS (IS IT EQUIVALENT TO PYTHON CODE?)
+                    // NOTE: MAY NEED TO REWRITE THIS PART
                     if (qpos + (size as u32) + 1) as usize > seq_bytes.len() {
                         Some(String::from_utf8(
                             seq_bytes[qpos as usize .. seq_bytes.len() as usize].to_vec()
@@ -206,7 +196,7 @@ impl LocusFeaturesIndel {
             self.common.alt_read_features.count(read, query_pos);
         }
 
-        self.common.all_read_features.count(&read, query_pos);
+        self.common.all_read_features.count(read, query_pos);
     }
 
     // get the genome coordinates of where an INDEL variant will actually
@@ -227,7 +217,7 @@ impl LocusFeaturesIndel {
     // Determine the allele in the read at the locus of an INDEL variant
     pub fn indels_overlapping_variant(
         &self,
-        read: &Rc<Record>,
+        read: &Record,
         var_start: u64,
         var_end: u64,
     ) -> Vec<IndelEvent> {
@@ -365,12 +355,12 @@ impl AlleleCountsSnv {
         }
     }
 
-    // fn depth(&self) -> u32 {
-    //     self.a + self.c + self.g + self.t + self.n
-    // }
+    fn depth(&self) -> u32 {
+        self.a + self.c + self.g + self.t + self.n
+    }
 
     pub fn stats(&self, refr: char, alt: char) -> AlleleCountsSnvStats {
-        let depth = self.a + self.c + self.g + self.t + self.n;
+        let depth = self.depth();
         let ref_count = self.count_for_base(refr);
         let alt_count = self.count_for_base(alt);
         let alt_vaf = if depth > 0 {
@@ -414,7 +404,7 @@ pub struct ReadFeatures {
 impl ReadFeatures {
     pub fn count(
         &mut self,
-        read: &Rc<Record>,
+        read: &Record,
         query_pos: Option<u32>,
     ) {
         // Instead of counting num of reads, can create a function that sums foward and reverse strand?
@@ -476,7 +466,7 @@ impl ReadFeatures {
 
     }
 
-    pub fn query_alignment_length(&self, record: &Rc<Record>) -> u32 {
+    pub fn query_alignment_length(&self, record: &Record) -> u32 {
         let mut len = 0;
         for c in record.cigar().iter() {
             match *c {
@@ -508,7 +498,7 @@ impl ReadFeatures {
     }
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct NormalizedLocusFeaturesRow {
     pub ref_nm: Option<f64>,
     pub ref_base_qual: Option<f64>,
@@ -544,7 +534,7 @@ pub struct NormalizedLocusFeaturesRow {
     pub all_normalised_read_position: Option<f64>,
 }
 
-#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct NormalizedReadFeatures {
     pub nm: Option<f64>,
     pub base_qual: Option<f64>,
