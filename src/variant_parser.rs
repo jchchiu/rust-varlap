@@ -234,9 +234,10 @@ fn is_acceptable_variant(
 }
 
 fn is_only_dna_bases(sequence: &str) -> bool {
-    sequence
-        .chars()
-        .all(|c| matches!(c.to_ascii_uppercase(), 'A' | 'T' | 'G' | 'C'))
+    !sequence.is_empty()
+        && sequence
+            .bytes()
+            .all(|b| matches!(b.to_ascii_uppercase(), b'A' | b'T' | b'G' | b'C'))
 }
 
 fn is_desired_type(varclass: &VarClass, vartype: &VarType) -> bool {
@@ -268,14 +269,162 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_dna_bases() {
-        // Valid DNA base lowercase
-        assert!(is_only_dna_bases("a"));
-        // Valid DNA base uppercase
-        assert!(is_only_dna_bases("A"));
-        // Invalid DNA base
-        assert!(!is_only_dna_bases("K"));
-        // Invalid DNA string
-        assert!(!is_only_dna_bases("string"));
+    fn is_only_dna_bases_cases() {
+        let cases = [
+            // Valid uppercase/lowercase
+            ("A", true),
+            ("a", true),
+            ("AaTtGgCc", true),
+
+            // Invalid bases
+            ("N", false),
+            ("?", false),
+            ("A-T", false),
+            ("A1T", false),
+            ("", false),
+        ];
+
+        for (sequence, expected) in cases {
+            assert_eq!(
+                is_only_dna_bases(sequence),
+                expected,
+                "sequence={sequence:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_desired_type_cases() {
+        let cases = [
+            (VarClass::Snv,   VarType::Snv, true),
+            (VarClass::Snv,   VarType::Ins, false),
+            (VarClass::Snv,   VarType::Del, false),
+            (VarClass::Indel, VarType::Snv, false),
+            (VarClass::Indel, VarType::Ins, true),
+            (VarClass::Indel, VarType::Del, true),
+        ];
+
+        for (varclass, vartype, expected) in cases {
+            assert_eq!(
+                is_desired_type(&varclass, &vartype),
+                expected,
+                "varclass={varclass:?}, vartype={vartype:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_valid_indel_cases() {
+        let cases = [
+            // Valid insertions
+            ("A", "AT", true),
+            ("AT", "ATG", true),
+
+            // Valid deletions
+            ("AT", "A", true),
+            ("ATG", "AT", true),
+
+            // Equal length
+            ("A", "T", false),
+            ("AT", "GC", false),
+
+            // Invalid insertion
+            ("A", "GA", false),
+            ("AT", "GAT", false),
+
+            // Invalid deletion
+            ("GA", "A", false),
+            ("GAT", "AT", false),
+
+            // Empty alleles
+            ("", "A", false),
+            ("A", "", false),
+        ];
+
+        for (refr, alt, expected) in cases {
+            assert_eq!(
+                is_valid_indel(refr, alt),
+                expected,
+                "REF={refr:?}, ALT={alt:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_acceptable_variant_cases() {
+        let cases = [
+            // Valid SNV
+            (
+                VarClass::Snv,
+                VarType::Snv,
+                "A",
+                "T",
+                true,
+            ),
+            // Valid insertion
+            (
+                VarClass::Indel,
+                VarType::Ins,
+                "A",
+                "AT",
+                true,
+            ),
+            // Valid deletion
+            (
+                VarClass::Indel,
+                VarType::Del,
+                "AT",
+                "A",
+                true,
+            ),
+            // Invalid reference base
+            (
+                VarClass::Snv,
+                VarType::Snv,
+                "N",
+                "T",
+                false,
+            ),
+            // Invalid alternate base
+            (
+                VarClass::Snv,
+                VarType::Snv,
+                "A",
+                "N",
+                false,
+            ),
+            // Wrong type
+            (
+                VarClass::Snv,
+                VarType::Ins,
+                "A",
+                "AT",
+                false,
+            ),
+            // Malformed insertion
+            (
+                VarClass::Indel,
+                VarType::Ins,
+                "A",
+                "GA",
+                false,
+            ),
+            // Malformed deletion
+            (
+                VarClass::Indel,
+                VarType::Del,
+                "GA",
+                "A",
+                false,
+            ),
+        ];
+
+        for (varclass, vartype, refr, alt, expected) in cases {
+            assert_eq!(
+                is_acceptable_variant(&varclass, &vartype, refr, alt),
+                expected,
+                "varclass={varclass:?}, vartype={vartype:?}, REF={refr:?}, ALT={alt:?}"
+            );
+        }
     }
 }
