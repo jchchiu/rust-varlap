@@ -168,7 +168,7 @@ impl LocusFeaturesIndel {
                     // NOTE: MAY NEED TO REWRITE THIS PART
                     if (qpos + (size as u32) + 1) as usize > seq_bytes.len() {
                         Some(String::from_utf8(
-                            seq_bytes[qpos as usize .. seq_bytes.len() as usize].to_vec()
+                            seq_bytes[qpos as usize .. seq_bytes.len()].to_vec()
                         )
                         .unwrap()
                         .to_ascii_uppercase())
@@ -185,9 +185,10 @@ impl LocusFeaturesIndel {
             };
             
             // FIX UNWRAP HERE
-            if refr == read_bases.unwrap() {
-                read_supports_ref = true;
-            }
+            if let Some(read_bases) = read_bases
+                && refr == read_bases {
+                    read_supports_ref = true;
+                }
         }
 
         if read_supports_ref {
@@ -221,8 +222,8 @@ impl LocusFeaturesIndel {
         var_start: u64,
         var_end: u64,
     ) -> Vec<IndelEvent> {
-        let mut read_pos: u32 = 0;
-        let mut ref_pos = read.pos() as u32;
+        let mut read_pos: u64 = 0;
+        let mut ref_pos = read.pos() as u64;
         let mut result = Vec::new();
 
         // See https://samtools.github.io/hts-specs/SAMv1.pdf page 8 for how CIGAR consumes
@@ -230,18 +231,18 @@ impl LocusFeaturesIndel {
             match *c {
                 // Consumes both reference and query
                 Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
-                    ref_pos += len;
-                    read_pos += len;
+                    ref_pos += len as u64;
+                    read_pos += len as u64;
                 }
                 // Only consumes query
                 Cigar::Ins(len) => {
-                    let this_start = ref_pos as u64;
+                    let this_start = ref_pos;
                     let this_end = this_start + len as u64 - 1;
 
                     if self.interval_overlaps(var_start, var_end, this_start, this_end) {
                         let seq_bytes = read.seq().as_bytes();
                         let inserted_bases = String::from_utf8(
-                            seq_bytes[read_pos as usize .. (read_pos + len) as usize].to_vec()
+                            seq_bytes[read_pos as usize .. (read_pos + len as u64) as usize].to_vec()
                         )
                         .unwrap()
                         .to_ascii_uppercase();
@@ -254,11 +255,11 @@ impl LocusFeaturesIndel {
                         });
                     }
 
-                    read_pos += len;
+                    read_pos += len as u64;
                 }
                 // Only consumes reference
                 Cigar::Del(len) => {
-                    let this_start = ref_pos as u64;
+                    let this_start = ref_pos;
                     let this_end = this_start + len as u64 - 1;
 
                     if self.interval_overlaps(var_start, var_end, this_start, this_end) {
@@ -270,15 +271,15 @@ impl LocusFeaturesIndel {
                         });
                     }
 
-                    ref_pos += len;
+                    ref_pos += len as u64;
                 }
                 // Only consumes reference
                 Cigar::RefSkip(len) => {
-                    ref_pos += len;
+                    ref_pos += len as u64;
                 }
                 // Only consumes query
                 Cigar::SoftClip(len) => {
-                    read_pos += len;
+                    read_pos += len as u64;
                 }
                 // Consumes neither reference nor query
                 Cigar::HardClip(_) | Cigar::Pad(_) => {}
@@ -287,7 +288,6 @@ impl LocusFeaturesIndel {
 
         result
     }
-
 }
 
 impl LocusFeaturesIndel {
@@ -388,12 +388,12 @@ pub struct AlleleCountsSnvStats {
 
 #[derive(Debug, Clone, Default)]
 pub struct ReadFeatures {
-    pub nm: u32,
-    pub base_qual: u32,
-    pub map_qual: u32,
-    pub align_len: u32,
-    pub clipping: u32,
-    pub indel: u32,
+    pub nm: u64,
+    pub base_qual: u64,
+    pub map_qual: u64,
+    pub align_len: u64,
+    pub clipping: u64,
+    pub indel: u64,
     pub forward_strand: u32,
     pub reverse_strand: u32,
     pub supplementary: u32,
@@ -409,7 +409,7 @@ impl ReadFeatures {
     ) {
         // Instead of counting num of reads, can create a function that sums foward and reverse strand?
         self.num_reads += 1;
-        let query_len = read.seq_len() as usize;
+        let query_len = read.seq_len();
 
         if let Some(qpos) = query_pos {
             if query_len > 0 {
@@ -419,37 +419,37 @@ impl ReadFeatures {
             let qpos_usize = qpos as usize;
             if qpos_usize < read.qual().len() {
                 let pos_qual = read.qual()[qpos_usize];
-                self.base_qual += pos_qual as u32;
+                self.base_qual += pos_qual as u64;
             }
         }
 
-        self.align_len += self.query_alignment_length(read) as u32;
-        self.map_qual += read.mapq() as u32;
+        self.align_len += self.query_alignment_length(read);
+        self.map_qual += read.mapq() as u64;
 
         for c in read.cigar().iter() {
             match *c {
-                Cigar::Ins(len) | Cigar::Del(len) => self.indel += len as u32,
-                Cigar::SoftClip(len) | Cigar::HardClip(len) => self.clipping += len as u32,
+                Cigar::Ins(len) | Cigar::Del(len) => self.indel += len as u64,
+                Cigar::SoftClip(len) | Cigar::HardClip(len) => self.clipping += len as u64,
                 _ => {}
             }
         }
 
         if let Ok(aux) = read.aux(b"NM") {
             match aux {
-                Aux::U8(v) => self.nm += v as u32,
-                Aux::U16(v) => self.nm += v as u32,
-                Aux::U32(v) => self.nm += v as u32,
+                Aux::U8(v) => self.nm += v as u64,
+                Aux::U16(v) => self.nm += v as u64,
+                Aux::U32(v) => self.nm += v as u64,
                 Aux::I8(v) => {
                     if v > 0 {
-                        self.nm += v as u32}
+                        self.nm += v as u64}
                     },
                 Aux::I16(v) => {
                     if v > 0 {
-                        self.nm += v as u32}
+                        self.nm += v as u64}
                     },
                 Aux::I32(v) => {
                     if v > 0 {
-                        self.nm += v as u32}
+                        self.nm += v as u64}
                     },
                 _ => {}
             }
@@ -466,11 +466,11 @@ impl ReadFeatures {
 
     }
 
-    pub fn query_alignment_length(&self, record: &Record) -> u32 {
-        let mut len = 0;
+    pub fn query_alignment_length(&self, record: &Record) -> u64 {
+        let mut len: u64 = 0;
         for c in record.cigar().iter() {
             match *c {
-                Cigar::Match(l) | Cigar::Equal(l) | Cigar::Diff(l) | Cigar::Ins(l) => len += l,
+                Cigar::Match(l) | Cigar::Equal(l) | Cigar::Diff(l) | Cigar::Ins(l) => len += l as u64,
                 _ => {}
             }
         }
