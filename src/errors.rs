@@ -31,8 +31,8 @@ pub enum AppError {
         filename: PathBuf,
     },
 
-    #[error("invalid CSV/TSV Header")]
-    InvalidDelimitedHeader {
+    #[error("missing required CSV/TSV Header")]
+    MissingDelimitedHeader {
         fields: String,
         headers: String,
     },
@@ -63,7 +63,7 @@ impl AppError {
             AppError::MissingVariantsExtension { .. } => 3,
             AppError::MissingReadsExtension { .. } => 3,
             AppError::InvalidGzipName { .. } => 3,
-            AppError::InvalidDelimitedHeader { .. } => 3,
+            AppError::MissingDelimitedHeader { .. } => 3,
             AppError::MissingCramReference => 3,
             AppError::MissingReferenceSequence { .. } => 3,
         }
@@ -123,7 +123,7 @@ pub fn print_error(program: &str, err: &AppError) {
             eprintln!("  variants.vcf.gz");
         }
 
-        AppError::InvalidDelimitedHeader { fields, headers } => {
+        AppError::MissingDelimitedHeader { fields, headers } => {
             eprintln!("{program} ERROR: invalid csv/tsv header");
             eprintln!("Missing required header");
             eprintln!("Expected one of: {}", fields);

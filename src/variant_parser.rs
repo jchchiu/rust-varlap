@@ -174,7 +174,7 @@ fn get_header_index(headers: &StringRecord, fields: &[&str]) -> Result<usize, Ap
         }
     }
 
-    return Err(AppError::InvalidDelimitedHeader {
+    return Err(AppError::MissingDelimitedHeader {
         fields: fields.join(", "),
         headers: headers.iter().collect::<Vec<&str>>().join(", "),
     })
