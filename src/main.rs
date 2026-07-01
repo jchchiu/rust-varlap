@@ -38,7 +38,7 @@ fn main() {
             std::process::exit(app_err.exit_code());
         }
 
-        // Everything else is an unexpected/runtime failure.
+        // Set everything else as a I/O error for now. FIX LATER
         eprintln!("{program} ERROR: {:#}", err);
         std::process::exit(1);
     }
