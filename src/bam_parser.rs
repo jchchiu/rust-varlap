@@ -30,7 +30,7 @@ pub fn parse_region(
         .with_context(|| format!("Failed to create output CSV '{}'", csv_path.display()))?;
 
     // Write dynamic header based on BAM/CRAM filename
-    write_header(&mut csv_writer, &reads_path, label, &varclass)
+    write_header(&mut csv_writer, reads_path, label, varclass)
         .context("Could not CSV write header")?;
 
     let mut reader = IndexedReader::from_path(reads_path)
@@ -39,7 +39,7 @@ pub fn parse_region(
     match file_type {
         FileType::Bam => {}
         FileType::Cram => {
-            let fasta = fasta_path.ok_or_else(|| AppError::MissingCramReference)?;
+            let fasta = fasta_path.ok_or(AppError::MissingCramReference)?;
 
             reader
                 .set_reference(fasta)
@@ -75,8 +75,8 @@ pub fn parse_region(
 
             while let Some(var) = chrom.variants.front() {
                 if (read_start + 1) > var.pos {
-                        let pos_fraction: f64 = var.get_pos_fraction(ref_seq_len);
-                        write_variant_row(&mut csv_writer, &var, pos_fraction, sample)?;
+                        let pos_normalized: f64 = var.get_pos_normalized(ref_seq_len);
+                        write_variant_row(&mut csv_writer, var, pos_normalized, sample)?;
                         chrom.variants.pop_front();
 
                 } else {
@@ -97,8 +97,8 @@ pub fn parse_region(
         }
 
         while let Some(var) = chrom.variants.pop_front() {
-            let pos_fraction = var.get_pos_fraction(ref_seq_len);
-            write_variant_row(&mut csv_writer, &var, pos_fraction, sample)?;
+            let pos_normalized = var.get_pos_normalized(ref_seq_len);
+            write_variant_row(&mut csv_writer, &var, pos_normalized, sample)?;
         }
         csv_writer
             .flush()

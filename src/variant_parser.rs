@@ -174,7 +174,7 @@ fn get_header_index(headers: &StringRecord, fields: &[&str]) -> Result<usize, Ap
         }
     }
 
-    return Err(AppError::MissingDelimitedHeader {
+    Err(AppError::MissingDelimitedHeader {
         fields: fields.join(", "),
         headers: headers.iter().collect::<Vec<&str>>().join(", "),
     })
@@ -283,12 +283,11 @@ fn process_variant_row(
             // Get unique chromosomes and their counts for variants addded to queue
             // NOTE: Variants file MUST be sorted in ascending order
             // We do not need to get the index as we are popping the queue when iterating over variants
-            if let Some(last) = buckets.last_mut() {
-                if last.chrom == row.chrom {
+            if let Some(last) = buckets.last_mut()
+                && last.chrom == row.chrom {
                     last.variants.push_back(variant);
                     continue;
                 }
-            }
 
             buckets.push(ChromBucket {
                 chrom: row.chrom.clone(),

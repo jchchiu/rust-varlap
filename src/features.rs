@@ -44,7 +44,7 @@ impl CommonLocusFeatures {
             ref_forward_strand: r.forward_strand,
             ref_reverse_strand: r.reverse_strand,
             ref_supplementary: r.supplementary,
-            ref_normalised_read_position: r.normalised_read_position,
+            ref_normalized_read_position: r.normalized_read_position,
 
             alt_nm: a.nm,
             alt_base_qual: a.base_qual,
@@ -55,7 +55,7 @@ impl CommonLocusFeatures {
             alt_forward_strand: a.forward_strand,
             alt_reverse_strand: a.reverse_strand,
             alt_supplementary: a.supplementary,
-            alt_normalised_read_position: a.normalised_read_position,
+            alt_normalized_read_position: a.normalized_read_position,
 
             all_nm: all.nm,
             all_base_qual: all.base_qual,
@@ -66,7 +66,7 @@ impl CommonLocusFeatures {
             all_forward_strand: all.forward_strand,
             all_reverse_strand: all.reverse_strand,
             all_supplementary: all.supplementary,
-            all_normalised_read_position: all.normalised_read_position,
+            all_normalized_read_position: all.normalized_read_position,
         }
     }    
 }
@@ -139,7 +139,7 @@ impl LocusFeaturesIndel {
         let size = refr.len().abs_diff(alt.len()) as u64;
         let end = start + size - 1;
 
-        let overlapping_indels = self.indels_overlapping_variant(&read, start, end);
+        let overlapping_indels = self.indels_overlapping_variant(read, start, end);
         self.overlapping_indels_count += overlapping_indels.len() as u64;
 
         let read_supports_alt = overlapping_indels.iter().any(|event| {
@@ -148,7 +148,7 @@ impl LocusFeaturesIndel {
                 && event.end == end
                 && match indel_type {
                     VarType::Del => true,
-                    VarType::Ins => event.bases == &alt[1..],
+                    VarType::Ins => event.bases == alt[1..],
                     _ => false,
                 }
         });
@@ -397,7 +397,7 @@ pub struct ReadFeatures {
     pub forward_strand: u32,
     pub reverse_strand: u32,
     pub supplementary: u32,
-    pub normalised_read_position: f64, 
+    pub normalized_read_position: f64, 
     pub num_reads: u32,
 }
 
@@ -413,7 +413,7 @@ impl ReadFeatures {
 
         if let Some(qpos) = query_pos {
             if query_len > 0 {
-                self.normalised_read_position += qpos as f64 / query_len as f64;
+                self.normalized_read_position += qpos as f64 / query_len as f64;
             }
 
             let qpos_usize = qpos as usize;
@@ -423,7 +423,7 @@ impl ReadFeatures {
             }
         }
 
-        self.align_len += self.query_alignment_length(&read) as u32;
+        self.align_len += self.query_alignment_length(read) as u32;
         self.map_qual += read.mapq() as u32;
 
         for c in read.cigar().iter() {
@@ -490,7 +490,7 @@ impl ReadFeatures {
                 forward_strand: Some(self.forward_strand as f64 / n),
                 reverse_strand: Some(self.reverse_strand as f64 / n),
                 supplementary: Some(self.supplementary as f64 / n),
-                normalised_read_position: Some(self.normalised_read_position / n),
+                normalized_read_position: Some(self.normalized_read_position / n),
             }
         } else {
             NormalizedReadFeatures::default()
@@ -509,7 +509,7 @@ pub struct NormalizedLocusFeaturesRow {
     pub ref_forward_strand: Option<f64>,
     pub ref_reverse_strand: Option<f64>,
     pub ref_supplementary: Option<f64>,
-    pub ref_normalised_read_position: Option<f64>,
+    pub ref_normalized_read_position: Option<f64>,
 
     pub alt_nm: Option<f64>,
     pub alt_base_qual: Option<f64>,
@@ -520,7 +520,7 @@ pub struct NormalizedLocusFeaturesRow {
     pub alt_forward_strand: Option<f64>,
     pub alt_reverse_strand: Option<f64>,
     pub alt_supplementary: Option<f64>,
-    pub alt_normalised_read_position: Option<f64>,
+    pub alt_normalized_read_position: Option<f64>,
 
     pub all_nm: Option<f64>,
     pub all_base_qual: Option<f64>,
@@ -531,7 +531,7 @@ pub struct NormalizedLocusFeaturesRow {
     pub all_forward_strand: Option<f64>,
     pub all_reverse_strand: Option<f64>,
     pub all_supplementary: Option<f64>,
-    pub all_normalised_read_position: Option<f64>,
+    pub all_normalized_read_position: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize)]
@@ -545,5 +545,5 @@ pub struct NormalizedReadFeatures {
     pub forward_strand: Option<f64>,
     pub reverse_strand: Option<f64>,
     pub supplementary: Option<f64>,
-    pub normalised_read_position: Option<f64>,
+    pub normalized_read_position: Option<f64>,
 }

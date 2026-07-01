@@ -58,7 +58,7 @@ impl Variant {
         self.features.normalized_row()
     }
 
-    pub fn get_pos_fraction(&self, ref_seq_len: u64) -> f64 {
+    pub fn get_pos_normalized(&self, ref_seq_len: u64) -> f64 {
         self.pos as f64/ ref_seq_len as f64
     }
 
