@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use csv::{ReaderBuilder, StringRecord};
 use flate2::read::MultiGzDecoder;
 use tracing::{debug, info, warn};
 
@@ -20,105 +21,18 @@ pub fn parse(variants_path: &Path, varclass: &VarClass) -> Result<ParsedVariants
             )
         )?;
 
-    let reader = check_valid_gzip(variants_path)
-        .with_context(||
-            format!("Failed to open reader for {}", variants_path.display()))?;
-
     info!(
         "Parsing variants from {} as {:?}",
         variants_path.display(),
         file_type
     );
 
-    // let mut variants = VecDeque::new();
-
     let mut buckets: Vec<ChromBucket> = Vec::new();
 
-    for (line_no, line_result) in reader.lines().enumerate() {
-        let line = line_result.with_context(|| {
-            format!("Failed reading line {} from {}", line_no + 1, variants_path.display())
-        })?;
-
-        if line.starts_with('#') {
-            continue;
-        }
-
-        let fields: Vec<&str> = match file_type {
-            FileType::Vcf | FileType::Tsv => line.split_whitespace().collect(),
-            FileType::Csv => line.split(',').collect(),
-        };
-
-        if fields.len() < 5 {
-            warn!("Skipping ipnut row at line {}: {}", line_no + 1, line);
-            continue;
-        }
-
-        let chrom = fields[0].to_string();
-
-        let pos = match fields[1].parse::<u64>() {
-            Ok(p) => p,
-            Err(err) => {
-                warn!(
-                    "Invalid POS at line {}: {} ({err})",
-                    line_no + 1,
-                    line
-                );
-                continue;
-            }
-        };
-
-        let refr = fields[3].to_string();
-
-        for alt in fields[4].split(',') {
-            let vartype = get_var_type(&refr, alt);
-
-            if is_acceptable_variant(varclass, &vartype, &refr, alt) {
-                let variant = match varclass {
-                    VarClass::Snv => Variant {
-                        chrom: chrom.clone(),
-                        pos,
-                        refr: refr.clone(),
-                        alt: alt.to_string(),
-                        vartype,
-                        features: LocusFeatures::Snv(LocusFeaturesSnv::default()),
-                    },
-                    VarClass::Indel => Variant {
-                        chrom: chrom.clone(),
-                        pos,
-                        refr: refr.clone(),
-                        alt: alt.to_string(),
-                        vartype,
-                        features: LocusFeatures::Indel(LocusFeaturesIndel::default()),
-                    },
-                };
-                // variants.push_back(variant);
-
-                // Get unique chromosomes and their counts for variants addded to queue
-                // NOTE: Variants file MUST be sorted in ascending order
-                // We do not need to get the index as we are popping the queue when iterating over variants
-                if let Some(last) = buckets.last_mut() {
-                    if last.chrom == chrom {
-                        last.variants.push_back(variant);
-                        continue;
-                    }
-                }
-
-                buckets.push(ChromBucket {
-                    chrom: chrom.clone(),
-                    variants: VecDeque::from([variant]),
-                });
-            } else {
-                debug!(
-                    "Skipped invalid variant at line {}: chrom={} pos={} ref={} alt={}",
-                    line_no + 1,
-                    chrom,
-                    pos,
-                    refr,
-                    alt
-                );
-            }
-        }
-    }
+    match file_type {
+        FileType::Vcf => parse_vcf(variants_path, varclass, &mut buckets)?,
+        FileType::Csv | FileType::Tsv => parse_delimited(variants_path, file_type, varclass, &mut buckets)?,
+    };
 
     // info!("Parsed {} variants from {}", variants.len(), variants_path.display());
     Ok(ParsedVariants { chroms: buckets })
@@ -161,6 +75,239 @@ fn detect_file_type(path: &Path) -> Result<FileType, AppError> {
     }
 }
 
+#[derive(Debug, Clone)]
+struct VariantRow {
+    chrom: String,
+    pos: u64,
+    refr: String,
+    alts: Vec<String>,
+    line_no: usize,
+}
+
+enum MaybeGzipReader {
+    Plain(File),
+    Gzip(MultiGzDecoder<File>),
+}
+
+impl Read for MaybeGzipReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            MaybeGzipReader::Plain(file) => file.read(buf),
+            MaybeGzipReader::Gzip(decoder) => decoder.read(buf),
+        }
+    }
+}
+
+fn open_variant_input(path: &Path) -> Result<MaybeGzipReader> {
+    let mut file = File::open(path)
+        .with_context(|| format!("Failed to open variants file '{}'", path.display()))?;
+
+    if is_gzip(&mut file)? {
+        Ok(MaybeGzipReader::Gzip(MultiGzDecoder::new(file)))
+    } else {
+        Ok(MaybeGzipReader::Plain(file))
+    }
+}
+
+fn parse_vcf(
+    file_path: &Path,
+    varclass: &VarClass,
+    buckets: &mut Vec<ChromBucket>,
+) -> Result<()> {
+    let input = open_variant_input(file_path)?;
+    let reader = BufReader::new(input);
+
+    for (line_no, line_result) in reader.lines().enumerate() {
+        let line = line_result.with_context(|| {
+            format!("Failed reading line {} from {}", line_no + 1, file_path.display())
+        })?;
+
+        // if line.starts_with("##") {
+        //     is_valid_vcf_header_line(&line)?;
+        // }
+
+        if line.starts_with('#') {
+            continue;
+        }
+
+        let fields: Vec<&str> = line.split('\t').collect();
+
+        if fields.len() < 5 {
+            warn!("Skipping input row at line {}: {}", line_no + 1, line);
+            continue;
+        }
+
+        let row = VariantRow {
+            chrom: fields[0].to_string(),
+            pos: match fields[1].parse() {
+                Ok(p) => p,
+                Err(err) => {
+                    warn!("Invalid POS at line {}: {} ({err})", line_no + 1, line);
+                    continue;
+                }
+            },
+            refr: fields[3].to_string(),
+            alts: fields[4].split(',').map(|s| s.to_string()).collect(),
+            line_no: line_no + 1,
+        };
+
+        process_variant_row(&row, varclass, buckets)?;
+    }
+
+    Ok(())
+}
+
+fn delimiter_for(file_type: FileType) -> u8 {
+    match file_type {
+        FileType::Csv => b',',
+        FileType::Tsv => b'\t',
+        FileType::Vcf => unreachable!(),
+    }
+}
+
+fn get_header_index(headers: &StringRecord, fields: &[&str]) -> Result<usize, AppError> {
+    for field in fields {
+        if let Some(idx) = headers
+            .iter()
+            .position(|h| h.eq_ignore_ascii_case(field)) {
+            return Ok(idx);
+        }
+    }
+
+    return Err(AppError::InvalidDelimitedHeader {
+        fields: fields.join(", "),
+        headers: headers.iter().collect::<Vec<&str>>().join(", "),
+    })
+}
+
+fn parse_delimited(
+    file_path: &Path,
+    file_type: FileType,
+    varclass: &VarClass,
+    buckets: &mut Vec<ChromBucket>,
+) -> Result<()> {
+    let input = open_variant_input(file_path)?;
+
+    let mut csv_reader = ReaderBuilder::new() 
+        .delimiter(delimiter_for(file_type))
+        .has_headers(true)
+        .flexible(true)
+        .from_reader(input);
+
+    let headers = csv_reader
+        .headers()
+        .with_context(|| format!("Failed to read headers from {}", file_path.display()))?
+        .clone();
+
+    let chrom_idx = get_header_index(&headers, &["chrom", "chr", "#chrom"])?;
+    let pos_idx = get_header_index(&headers, &["pos", "position"])?;
+    let ref_idx = get_header_index(&headers, &["ref", "refr", "reference"])?;
+    let alt_idx = get_header_index(&headers, &["alt", "alts", "alternate"])?;
+
+    for (record_no, record_result) in csv_reader.records().enumerate() {
+        let record = record_result.with_context(|| {
+            format!("Failed reading record {} from {}", record_no + 2, file_path.display())
+        })?;
+
+        let line_no = record_no + 2;
+
+        let row = VariantRow {
+            chrom: match record.get(chrom_idx) {
+                Some(v) if !v.trim().is_empty() => v.trim().to_string(),
+                _ => {
+                    warn!("Missing CHROM at line {}", line_no);
+                    continue;
+                }
+            },
+            pos: match record.get(pos_idx).map(str::trim).unwrap_or("").parse() {
+                Ok(p) => p,
+                Err(err) => {
+                    warn!("Invalid POS at line {}: {:?} ({err})", line_no, record);
+                    continue;
+                }
+            },
+            refr: match record.get(ref_idx) {
+                Some(v) if !v.trim().is_empty() => v.trim().to_string(),
+                _ => {
+                    warn!("Missing REF at line {}", line_no);
+                    continue;
+                }
+            },
+            alts: match record.get(alt_idx) {
+                Some(v) if !v.trim().is_empty() => {
+                    v.split(',').map(|s| s.trim().to_string()).collect()
+                }
+                _ => {
+                    warn!("Missing ALT at line {}", line_no);
+                    continue;
+                }
+            },
+            line_no,
+        };
+
+        process_variant_row(&row, varclass, buckets)?;
+    }
+
+    Ok(())
+}
+
+fn process_variant_row(
+    row: &VariantRow, 
+    varclass: &VarClass, 
+    buckets: &mut Vec<ChromBucket>) 
+-> Result<()> {
+    for alt in &row.alts {
+        let vartype = get_var_type(&row.refr, alt);
+
+        if is_acceptable_variant(varclass, &vartype, &row.refr, alt) {
+            let variant = match varclass {
+                VarClass::Snv => Variant {
+                    chrom: row.chrom.clone(),
+                    pos: row.pos,
+                    refr: row.refr.clone(),
+                    alt: alt.to_string(),
+                    vartype,
+                    features: LocusFeatures::Snv(LocusFeaturesSnv::default()),
+                },
+                VarClass::Indel => Variant {
+                    chrom: row.chrom.clone(),
+                    pos: row.pos,
+                    refr: row.refr.clone(),
+                    alt: alt.to_string(),
+                    vartype,
+                    features: LocusFeatures::Indel(LocusFeaturesIndel::default()),
+                },
+            };
+            // variants.push_back(variant);
+
+            // Get unique chromosomes and their counts for variants addded to queue
+            // NOTE: Variants file MUST be sorted in ascending order
+            // We do not need to get the index as we are popping the queue when iterating over variants
+            if let Some(last) = buckets.last_mut() {
+                if last.chrom == row.chrom {
+                    last.variants.push_back(variant);
+                    continue;
+                }
+            }
+
+            buckets.push(ChromBucket {
+                chrom: row.chrom.clone(),
+                variants: VecDeque::from([variant]),
+            });
+        } else {
+            debug!(
+                "Skipped invalid variant at line {}: chrom={} pos={} ref={} alt={}",
+                row.line_no + 1,
+                row.chrom,
+                row.pos,
+                row.refr,
+                alt
+            );
+        }
+    }
+    Ok(())
+}
+
 fn get_var_type(refr: &str, alt: &str) -> VarType {
     if refr.len() == 1 && alt.len() == 1 {
         VarType::Snv
@@ -184,33 +331,28 @@ fn get_var_type(refr: &str, alt: &str) -> VarType {
 /// Gzip magic bytes: the first two bytes of any gzip-compressed file.
 const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 
-fn check_valid_gzip(file_path: &Path) -> Result<Box<dyn BufRead>> {
-    let mut file = File::open(file_path)
-        .with_context(|| format!("Failed to open variants file '{}'", file_path.display()))?;
-
-    // Read the first two bytes to check for gzip magic number
-    let mut magic = [0u8; 2];
-    let bytes_read = file
+fn is_gzip(file: &mut File) -> Result<bool> {
+    let mut magic = [0; 2];
+    let bytes = file
         .read(&mut magic)
-        .with_context(|| format!("Failed to read header from '{}'", file_path.display()))?;
+        .with_context(|| format!("Failed to read first two bytes from '{:?}'", file))?;
 
-    // Seek back to the beginning so the reader starts from byte 0
+    // Go back to the start of the file
     file.seek(SeekFrom::Start(0))
-        .with_context(|| format!("Failed to reseek start of file '{}'", file_path.display()))?;
+        .with_context(|| format!("Failed to reseek start of file '{:?}'", file))?;
 
-    if bytes_read >= 2 && magic == GZIP_MAGIC {
-        debug!("Detected gzip-compressed input: {}", file_path.display());
-        let decoder = MultiGzDecoder::new(file);
-        Ok(Box::new(BufReader::new(decoder)))
-    } else {
-        debug!("Detected plain-text input: {}", file_path.display());
-        Ok(Box::new(BufReader::new(file)))
-    }
+    Ok(bytes >= 2 && magic == GZIP_MAGIC)
 }
 
-// fn is_valid_vcf_header_line(line: &str) -> bool {
+// fn is_valid_vcf_header_line(line: &str) -> Result<(), AppError> {
 //     let expected = ["#CHROM", "POS", "ID", "REF", "ALT"];
-//     line.split_whitespace().take(5).eq(expected)
+//     if line.split('\t').take(5).eq(expected){
+//         return Err(AppError::InvalidVcfHeader {
+//             header: line.split('\t').collect(),
+//         })
+//     } else {
+//         Ok(())
+//     }
 // }
 
 fn is_acceptable_variant(

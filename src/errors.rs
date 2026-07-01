@@ -31,6 +31,17 @@ pub enum AppError {
         filename: PathBuf,
     },
 
+    #[error("invalid CSV/TSV Header")]
+    InvalidDelimitedHeader {
+        fields: String,
+        headers: String,
+    },
+
+    // #[error("invalid VCF Header")]
+    // InvalidVcfHeader {
+    //     header: String,
+    // },
+
     #[error("CRAM file requires a reference FASTA")]
     MissingCramReference,
 
@@ -52,6 +63,7 @@ impl AppError {
             AppError::MissingVariantsExtension { .. } => 3,
             AppError::MissingReadsExtension { .. } => 3,
             AppError::InvalidGzipName { .. } => 3,
+            AppError::InvalidDelimitedHeader { .. } => 3,
             AppError::MissingCramReference => 3,
             AppError::MissingReferenceSequence { .. } => 3,
         }
@@ -109,6 +121,13 @@ pub fn print_error(program: &str, err: &AppError) {
             eprintln!("Input file: {}", filename.display());
             eprintln!("Expected something like:");
             eprintln!("  variants.vcf.gz");
+        }
+
+        AppError::InvalidDelimitedHeader { fields, headers } => {
+            eprintln!("{program} ERROR: invalid csv/tsv header");
+            eprintln!("Missing required header");
+            eprintln!("Expected one of: {}", fields);
+            eprintln!("Found headers: {}", headers);
         }
 
         AppError::MissingCramReference => {
