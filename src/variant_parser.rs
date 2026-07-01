@@ -259,7 +259,7 @@ fn process_variant_row(
     for alt in &row.alts {
         let vartype = get_var_type(&row.refr, alt);
 
-        if is_acceptable_variant(varclass, &vartype, &row.refr, alt) {
+        if is_acceptable_variant(varclass, &vartype, row, alt) {
             let variant = match varclass {
                 VarClass::Snv => Variant {
                     chrom: row.chrom.clone(),
@@ -293,17 +293,9 @@ fn process_variant_row(
                 chrom: row.chrom.clone(),
                 variants: VecDeque::from([variant]),
             });
-        } else {
-            debug!(
-                "Skipped invalid variant at line {}: chrom={} pos={} ref={} alt={}",
-                row.line_no + 1,
-                row.chrom,
-                row.pos,
-                row.refr,
-                alt
-            );
         }
     }
+
     Ok(())
 }
 
@@ -357,17 +349,49 @@ fn is_gzip(file: &mut File) -> Result<bool> {
 fn is_acceptable_variant(
     varclass: &VarClass,
     vartype: &VarType,
-    refr: &str,
+    row: &VariantRow,
     alt: &str,
     // max_indel_size: u32,
 ) -> bool {
-    if !is_only_dna_bases(refr) || !is_only_dna_bases(alt) {
+    if !is_only_dna_bases(&row.refr) || !is_only_dna_bases(alt) {
+        debug!(
+            "Skipped invalid variant at line {}: chrom={} pos={} \n 
+            ref={} or alt={} contains non DNA bases (a, c, t, g)",
+            row.line_no + 1,
+            row.chrom,
+            row.pos,
+            row.refr,
+            alt,
+        );
+        
         false
     } else if !is_desired_type(varclass, vartype) {
+        debug!(
+            "Skipped invalid variant at line {}: chrom={} pos={} ref={} alt={} \n 
+            varclass={:?} and vartype={:?} do not match",
+            row.line_no + 1,
+            row.chrom,
+            row.pos,
+            row.refr,
+            alt,
+            varclass,
+            vartype,
+        );
+
         false
     // } else if !is_within_max_size(varclass, max_indel_size, refr, alt) {
     //     false
-    } else if matches!(varclass, VarClass::Indel) && !is_valid_indel(refr, alt) {
+    } else if matches!(varclass, VarClass::Indel) && !is_valid_indel(&row.refr, alt) {
+        debug!(
+            "Skipped invalid variant at line {}: chrom={} pos={} vartype={:?} \n 
+            ref={} is not a valid indel",
+            row.line_no + 1,
+            row.chrom,
+            row.pos,
+            vartype,
+            row.refr,
+        );
+        
         false
     } else {
         true
@@ -495,74 +519,34 @@ mod tests {
     fn is_acceptable_variant_cases() {
         let cases = [
             // Valid SNV
-            (
-                VarClass::Snv,
-                VarType::Snv,
-                "A",
-                "T",
-                true,
-            ),
+            (VarClass::Snv, VarType::Snv, "A", "T", true),
             // Valid insertion
-            (
-                VarClass::Indel,
-                VarType::Ins,
-                "A",
-                "AT",
-                true,
-            ),
+            (VarClass::Indel, VarType::Ins, "A", "AT", true),
             // Valid deletion
-            (
-                VarClass::Indel,
-                VarType::Del,
-                "AT",
-                "A",
-                true,
-            ),
+            (VarClass::Indel, VarType::Del, "AT", "A", true),
             // Invalid reference base
-            (
-                VarClass::Snv,
-                VarType::Snv,
-                "N",
-                "T",
-                false,
-            ),
+            (VarClass::Snv, VarType::Snv, "N", "T", false),
             // Invalid alternate base
-            (
-                VarClass::Snv,
-                VarType::Snv,
-                "A",
-                "N",
-                false,
-            ),
+            (VarClass::Snv, VarType::Snv, "A", "N", false),
             // Wrong type
-            (
-                VarClass::Snv,
-                VarType::Ins,
-                "A",
-                "AT",
-                false,
-            ),
+            (VarClass::Snv, VarType::Ins, "A", "AT", false),
             // Malformed insertion
-            (
-                VarClass::Indel,
-                VarType::Ins,
-                "A",
-                "GA",
-                false,
-            ),
+            (VarClass::Indel, VarType::Ins, "A", "GA", false),
             // Malformed deletion
-            (
-                VarClass::Indel,
-                VarType::Del,
-                "GA",
-                "A",
-                false,
-            ),
+            (VarClass::Indel, VarType::Del, "GA", "A", false),
         ];
 
         for (varclass, vartype, refr, alt, expected) in cases {
+            let row = VariantRow {
+                chrom: "chr1".to_string(),
+                pos: 1,
+                refr: refr.to_string(),
+                alts: vec![alt.to_string()],
+                line_no: 0,
+            };
+
             assert_eq!(
-                is_acceptable_variant(&varclass, &vartype, refr, alt),
+                is_acceptable_variant(&varclass, &vartype, &row, alt),
                 expected,
                 "varclass={varclass:?}, vartype={vartype:?}, REF={refr:?}, ALT={alt:?}"
             );
