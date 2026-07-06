@@ -1,9 +1,9 @@
-mod bam_parser;
 mod binning;
 mod cli;
 mod errors;
 mod features;
 mod output;
+mod read_parser;
 mod variant;
 mod variant_parser;
 
@@ -20,7 +20,7 @@ fn run() -> Result<()> {
     let mut binned_variants =
         binning::bin(&parsed_variants)?;
 
-    bam_parser::parse_region(
+    read_parser::parse_region(
         &mut binned_variants, 
         &args.reads, 
         &args.output, 
