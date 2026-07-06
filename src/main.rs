@@ -1,4 +1,5 @@
 mod bam_parser;
+mod binning;
 mod cli;
 mod errors;
 mod features;
@@ -13,11 +14,14 @@ use crate::errors::{AppError, print_error};
 fn run() -> Result<()> {
     let args = cli::parse();
 
-    let mut parsed_variants = 
+    let parsed_variants =
         variant_parser::parse(&args.variants, &args.varclass)?;
 
+    let mut binned_variants =
+        binning::bin(&parsed_variants)?;
+
     bam_parser::parse_region(
-        &mut parsed_variants, 
+        &mut binned_variants, 
         &args.reads, 
         &args.output, 
         args.sample.as_deref(),

@@ -5,14 +5,13 @@ use std::rc::Rc;
 use anyhow::{Context, Result};
 use csv::{WriterBuilder};
 use rust_htslib::bam::{Read, IndexedReader, Record};
-// use tracing::instrument::WithSubscriber;
 
 use crate::errors::AppError;
 use crate::output::{write_variant_row, write_header};
-use crate::variant::{Variant, VarClass, ParsedVariants};
+use crate::variant::{Variant, VarClass, BinnedVariants};
 
 pub fn parse_region(
-    parsed_variants: &mut ParsedVariants,
+    binned_variants: &mut BinnedVariants,
     reads_path: &Path,
     csv_path: &Path,
     sample: Option<&str>,
@@ -47,21 +46,21 @@ pub fn parse_region(
         },
     };
 
-    for chrom in &mut parsed_variants.chroms{
+    for bin in &mut binned_variants.bins{
 
-        let chrom_info = get_chrom_info(&chrom.variants);
+        let chrom_info = get_chrom_info(&bin.variants);
 
-        reader.fetch((&chrom.chrom, chrom_info.min_pos - 1, chrom_info.max_pos))
+        reader.fetch((&bin.chrom, chrom_info.min_pos - 1, chrom_info.max_pos))
             .with_context(|| 
                 format!(
                     "Failed to fetch region {}:{}-{}",
-                        chrom.chrom,
+                        bin.chrom,
                         chrom_info.min_pos,
                         chrom_info.max_pos,    
                 )
             )?;
 
-        let ref_seq_len = get_ref_len(&reader, &chrom.chrom)?;
+        let ref_seq_len = get_ref_len(&reader, &bin.chrom)?;
 
         for read_result in reader.rc_records() {
             let record = read_result
@@ -73,19 +72,19 @@ pub fn parse_region(
 
             let read_start = record.pos() as u64;
 
-            while let Some(var) = chrom.variants.front() {
-                if (read_start + 1) > var.pos {
+            while let Some(var) = bin.variants.front() {
+                if (read_start + 1) > var.info.pos {
                         let pos_normalized: f64 = var.get_pos_normalized(ref_seq_len);
                         write_variant_row(&mut csv_writer, var, pos_normalized, sample)?;
-                        chrom.variants.pop_front();
+                        bin.variants.pop_front();
 
                 } else {
                     break;
                 }
             }
 
-            for var in &mut chrom.variants {
-                let zero_based_pos = var.pos - 1;
+            for var in &mut bin.variants {
+                let zero_based_pos = var.info.pos - 1;
                 let read_end = record.cigar().end_pos() as u64;
 
                 if zero_based_pos >= read_start && zero_based_pos < read_end {
@@ -96,7 +95,7 @@ pub fn parse_region(
             }
         }
 
-        while let Some(var) = chrom.variants.pop_front() {
+        while let Some(var) = bin.variants.pop_front() {
             let pos_normalized = var.get_pos_normalized(ref_seq_len);
             write_variant_row(&mut csv_writer, &var, pos_normalized, sample)?;
         }
@@ -151,8 +150,8 @@ fn get_chrom_info(variants: &VecDeque<Variant>) -> ChromInfo {
         .expect("Internal error: chromosome contains no variants");
 
     ChromInfo {
-        min_pos: first.pos,
-        max_pos: last.pos,
+        min_pos: first.info.pos,
+        max_pos: last.info.pos,
     }
 }
 

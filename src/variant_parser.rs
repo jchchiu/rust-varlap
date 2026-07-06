@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
@@ -9,8 +8,7 @@ use flate2::read::MultiGzDecoder;
 use tracing::{debug, info, warn};
 
 use crate::errors::AppError;
-use crate::features::{LocusFeatures, LocusFeaturesIndel, LocusFeaturesSnv};
-use crate::variant::{Variant, VarClass, VarType, ChromBucket, ParsedVariants};
+use crate::variant::{VariantInfo, VarClass, VarType, ParsedVariants};
 
 pub fn parse(variants_path: &Path, varclass: &VarClass) -> Result<ParsedVariants> {
     let file_type = detect_file_type(variants_path)
@@ -27,15 +25,15 @@ pub fn parse(variants_path: &Path, varclass: &VarClass) -> Result<ParsedVariants
         file_type
     );
 
-    let mut buckets: Vec<ChromBucket> = Vec::new();
+    let mut variants: Vec<VariantInfo> = Vec::new();
 
     match file_type {
-        FileType::Vcf => parse_vcf(variants_path, varclass, &mut buckets)?,
-        FileType::Csv | FileType::Tsv => parse_delimited(variants_path, file_type, varclass, &mut buckets)?,
+        FileType::Vcf => parse_vcf(variants_path, varclass, &mut variants)?,
+        FileType::Csv | FileType::Tsv => parse_delimited(variants_path, file_type, varclass, &mut variants)?,
     };
 
-    // info!("Parsed {} variants from {}", variants.len(), variants_path.display());
-    Ok(ParsedVariants { chroms: buckets })
+    info!("Parsed {} variants from {}", variants.len(), variants_path.display());
+    Ok(ParsedVariants { variants })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -112,7 +110,7 @@ fn open_variant_input(path: &Path) -> Result<MaybeGzipReader> {
 fn parse_vcf(
     file_path: &Path,
     varclass: &VarClass,
-    buckets: &mut Vec<ChromBucket>,
+    variants: &mut Vec<VariantInfo>,
 ) -> Result<()> {
     let input = open_variant_input(file_path)?;
     let reader = BufReader::new(input);
@@ -151,7 +149,7 @@ fn parse_vcf(
             line_no: line_no + 1,
         };
 
-        process_variant_row(&row, varclass, buckets)?;
+        process_variant_row(&row, varclass, variants)?;
     }
 
     Ok(())
@@ -184,7 +182,7 @@ fn parse_delimited(
     file_path: &Path,
     file_type: FileType,
     varclass: &VarClass,
-    buckets: &mut Vec<ChromBucket>,
+    variants: &mut Vec<VariantInfo>,
 ) -> Result<()> {
     let input = open_variant_input(file_path)?;
 
@@ -245,7 +243,7 @@ fn parse_delimited(
             line_no,
         };
 
-        process_variant_row(&row, varclass, buckets)?;
+        process_variant_row(&row, varclass, variants)?;
     }
 
     Ok(())
@@ -254,45 +252,30 @@ fn parse_delimited(
 fn process_variant_row(
     row: &VariantRow, 
     varclass: &VarClass, 
-    buckets: &mut Vec<ChromBucket>) 
+    variants: &mut Vec<VariantInfo>) 
 -> Result<()> {
     for alt in &row.alts {
         let vartype = get_var_type(&row.refr, alt);
 
         if is_acceptable_variant(varclass, &vartype, row, alt) {
             let variant = match varclass {
-                VarClass::Snv => Variant {
+                VarClass::Snv => VariantInfo {
                     chrom: row.chrom.clone(),
                     pos: row.pos,
                     refr: row.refr.clone(),
                     alt: alt.to_string(),
                     vartype,
-                    features: LocusFeatures::Snv(LocusFeaturesSnv::default()),
                 },
-                VarClass::Indel => Variant {
+                VarClass::Indel => VariantInfo {
                     chrom: row.chrom.clone(),
                     pos: row.pos,
                     refr: row.refr.clone(),
                     alt: alt.to_string(),
                     vartype,
-                    features: LocusFeatures::Indel(LocusFeaturesIndel::default()),
                 },
             };
-            // variants.push_back(variant);
-
-            // Get unique chromosomes and their counts for variants addded to queue
-            // NOTE: Variants file MUST be sorted in ascending order
-            // We do not need to get the index as we are popping the queue when iterating over variants
-            if let Some(last) = buckets.last_mut()
-                && last.chrom == row.chrom {
-                    last.variants.push_back(variant);
-                    continue;
-                }
-
-            buckets.push(ChromBucket {
-                chrom: row.chrom.clone(),
-                variants: VecDeque::from([variant]),
-            });
+            
+            variants.push(variant);
         }
     }
 

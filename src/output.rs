@@ -56,7 +56,7 @@ pub fn write_variant_row(
         .with_context(||
             format!(
                 "Failed to write variant '{}:{}' to output CSV",
-                var.chrom, var.pos
+                var.info.chrom, var.info.pos
             )
         )?;
 
@@ -188,11 +188,11 @@ impl<'a> OutputRowSNV<'a> {
         };
 
         Self {
-            chrom: &var.chrom,
-            pos: var.pos,
-            refr: &var.refr,
-            alt: &var.alt,
-            vartype: var.vartype.as_str(),
+            chrom: &var.info.chrom,
+            pos: var.info.pos,
+            refr: &var.info.refr,
+            alt: &var.info.alt,
+            vartype: var.info.vartype.as_str(),
             pos_normalized,
             sample,
             depth: bcs.depth,
@@ -239,11 +239,11 @@ impl<'a> OutputRowINDEL<'a> {
         let stats = var.indel_stats().expect("Could not get indel count statistics.");
 
         Self {
-            chrom: &var.chrom,
-            pos: var.pos,
-            refr: &var.refr,
-            alt: &var.alt,
-            vartype: var.vartype.as_str(),
+            chrom: &var.info.chrom,
+            pos: var.info.pos,
+            refr: &var.info.refr,
+            alt: &var.info.alt,
+            vartype: var.info.vartype.as_str(),
             pos_normalized,
             sample,
             depth: stats.depth,
