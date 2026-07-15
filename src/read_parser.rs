@@ -5,6 +5,7 @@ use std::rc::Rc;
 use anyhow::{Context, Result};
 use csv::{WriterBuilder};
 use rust_htslib::bam::{Read, IndexedReader, Record};
+use tracing::{debug, info, warn};
 
 use crate::errors::AppError;
 use crate::output::{write_variant_row, write_header};
@@ -28,10 +29,6 @@ pub fn parse_region(
         .from_path(csv_path)
         .with_context(|| format!("Failed to create output CSV '{}'", csv_path.display()))?;
 
-    // Write dynamic header based on BAM/CRAM filename
-    write_header(&mut csv_writer, reads_path, label, varclass)
-        .context("Could not CSV write header")?;
-
     let mut reader = IndexedReader::from_path(reads_path)
         .with_context(|| format!("Failed to open reads file '{}'", reads_path.display()))?;
 
@@ -46,6 +43,16 @@ pub fn parse_region(
         },
     };
 
+    // Write dynamic header based on BAM/CRAM filename
+    write_header(&mut csv_writer, reads_path, label, varclass)
+        .context("Could not CSV write header")?;
+
+    info!(
+        "Parsing reads from '{}' as {:?}",
+        reads_path.display(),
+        file_type
+    );
+
     for bin in &mut binned_variants.bins{
 
         let chrom_info = get_chrom_info(&bin.variants);
@@ -59,6 +66,16 @@ pub fn parse_region(
                         chrom_info.max_pos,    
                 )
             )?;
+
+        debug!(
+            "Processing bin from chromosome: {} \n
+             Spanning position {} - {} \n
+             Number of variants being processed {}",
+            bin.chrom,
+            chrom_info.min_pos,
+            chrom_info.max_pos,
+            bin.variants.len(),
+        );
 
         let ref_seq_len = get_ref_len(&reader, &bin.chrom)?;
 
@@ -108,12 +125,12 @@ pub fn parse_region(
 }
 
 #[derive(Debug, Clone, Copy)]
-enum FileType {
+pub enum FileType {
     Bam,
     Cram,
 }
 
-fn detect_file_type(path: &Path) -> Result<FileType, AppError> {
+pub fn detect_file_type(path: &Path) -> Result<FileType, AppError> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())

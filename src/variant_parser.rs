@@ -20,7 +20,7 @@ pub fn parse(variants_path: &Path, varclass: &VarClass) -> Result<ParsedVariants
         )?;
 
     info!(
-        "Parsing variants from {} as {:?}",
+        "Parsing variants from '{}' as {:?}",
         variants_path.display(),
         file_type
     );
@@ -32,7 +32,7 @@ pub fn parse(variants_path: &Path, varclass: &VarClass) -> Result<ParsedVariants
         FileType::Csv | FileType::Tsv => parse_delimited(variants_path, file_type, varclass, &mut variants)?,
     };
 
-    info!("Parsed {} variants from {}", variants.len(), variants_path.display());
+    info!("Parsed {} variants successfully", variants.len());
     Ok(ParsedVariants { variants })
 }
 
@@ -117,7 +117,7 @@ fn parse_vcf(
 
     for (line_no, line_result) in reader.lines().enumerate() {
         let line = line_result.with_context(|| {
-            format!("Failed reading line {} from {}", line_no + 1, file_path.display())
+            format!("Failed reading line {}", line_no + 1)
         })?;
 
         // if line.starts_with("##") {
@@ -194,7 +194,7 @@ fn parse_delimited(
 
     let headers = csv_reader
         .headers()
-        .with_context(|| format!("Failed to read headers from {}", file_path.display()))?
+        .with_context(|| format!("Failed to read headers from '{}'", file_path.display()))?
         .clone();
 
     let chrom_idx = get_header_index(&headers, &["chrom", "chr", "#chrom"])?;
@@ -204,7 +204,7 @@ fn parse_delimited(
 
     for (record_no, record_result) in csv_reader.records().enumerate() {
         let record = record_result.with_context(|| {
-            format!("Failed reading record {} from {}", record_no + 2, file_path.display())
+            format!("Failed reading record {}", record_no + 2)
         })?;
 
         let line_no = record_no + 2;
