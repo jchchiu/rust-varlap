@@ -47,7 +47,7 @@ pub fn parse_region(
         .context("Could not CSV write header")?;
 
     info!(
-        "Parsing reads from '{}' as {:?}",
+        "Parsing reads from {:?} as: {:?}",
         reads_path.display(),
         file_type
     );
@@ -121,6 +121,7 @@ pub fn parse_region(
     }
 
     info!("Parsed reads successfully");
+    info!("Csv output can be found at: {:?}", csv_path.display());
 
     Ok(())
 }

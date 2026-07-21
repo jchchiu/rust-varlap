@@ -39,8 +39,11 @@ fn run() -> Result<()> {
 fn main() {
     tracing_subscriber::fmt().init();
 
+    let program = env!("CARGO_PKG_NAME");
+
+    info!("{} has started", program);
+
     if let Err(err) = run() {
-        let program = env!("CARGO_PKG_NAME");
 
         if let Some(app_err) = err.downcast_ref::<AppError>() {
             print_error(program, app_err);
@@ -52,5 +55,5 @@ fn main() {
         std::process::exit(1);
     }
 
-    info!("rust-varlap has completed successfully");
+    info!("{} has completed successfully", program);
 }

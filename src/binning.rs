@@ -91,7 +91,7 @@ pub fn bin<'a>(
         }
     }
 
-    info!("Created {:?} bins for variants successfully", bins.len());
+    info!("Number of bins created for variants successfully: {}", bins.len());
 
     Ok(BinnedVariants { bins })
 }
