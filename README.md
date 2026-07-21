@@ -9,15 +9,21 @@ rust-varlap is a rewrite of [varlap](https://github.com/bjpop/varlap) from pytho
 
 ## Changes
 - The algorithm now iterates over reads instead of variants
-- Multiple bam inputs are not currently supported (Can be implemented if needed; however, output will most likely be separate csvs instead of a combined csv)
+    - Instead of calling pileup over variants we are now fetching reads for variants within a given range
+    - Variants are binned by chromosome, and further binned if variants are some `n` distance apart (gap)
+    - From preliminary testing, we have set the default gap size as 100 kb (100,000 bp) as it balances performance between files with sparsely and densely populated variants
+    - An optional hyperparameter has can be used to control this gap size between bins; generally speaking, sparsely populated variants throughout chromosomes may perform better if gap size is small (e.g. `5 x mean read length`); conversely, for densely populated variants all throughout the chromosome performance may be better if gap size is large (e.g. 1 Mb or even more)
+- Multiple bam inputs are not currently supported
+    - Can be implemented if needed; however, output will most likely be separate csvs instead of a combined csv
 - Changed header output field labels:
     - e.g. from [label + ' ' + 'ref avg nm'] to [label + ' ' + 'ref_avg_nm']
     - Easier to split header if necessary (split by ' ' will separate bam label and statistic field)
 - CRAM files are now supported
-- gzipped input variant files are supported
+- gzipped input variant files are now supported
+- Region mode with bed files/Outliers mode is not currently supported
 
 ## Notes
-- For csv files, multiple alt alleles are not supported (e.g. A, T). Please separate them into multiple rows (i.e. row for A, row for T)
+- For csv files, multiple alt alleles are not supported (e.g. `A,T`). Please separate them into multiple rows (i.e. row for `A` alt, row for `T` alt)
 
 ## To-do
 - ~~Fix csv/tsv parsing (figure out best idiomatic way in rust to reduce resources/minimize friction when attempting multithreading/duplicate code)~~
@@ -29,3 +35,4 @@ rust-varlap is a rewrite of [varlap](https://github.com/bjpop/varlap) from pytho
 - Add region scanning mode (split into subcommands, 'allele' and 'region')
 - Implement multithreading
 - Deal with paired reads (implement something similar to mosdepth?)
+- Add option to sort variants if unsorted
