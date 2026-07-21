@@ -49,9 +49,16 @@ pub fn bin<'a>(
     // let default_gap = 100000u64;
 
     // Use the gap provided, or set the bin size gap to default of 100kb
-    let gap = gap.unwrap_or(DEFAULT_GAP);
-
-    info!("Set gap between bins as {:?}bp", gap);
+    let gap = match gap {
+        Some(gap) => {
+            info!("Using user-provided bin gap: {} bp", gap);
+            gap
+        }
+        None => {
+            info!("Using default bin gap: {} bp", DEFAULT_GAP);
+            DEFAULT_GAP
+        }
+    };
     
     for variant in &parsed_variants.variants {
         let should_append = if let Some(last_bin) = bins.last() {

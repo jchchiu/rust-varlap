@@ -37,7 +37,7 @@ pub struct Cli {
     #[arg(short, long)]
     pub fasta: Option<PathBuf>,
 
-    /// Optional bin size gap (if not provided will default to 100kb (100,000bp))
+    /// Optional bin size gap (if not provided will default to 100 kb (100,000 bp))
     #[arg(long)]
     pub gap: Option<u64>,
 }

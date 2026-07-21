@@ -113,7 +113,7 @@ pub fn print_error(program: &str, err: &AppError) {
         } => {
             eprintln!("{program} ERROR: variants are not sorted");
             eprintln!("At chromosome: {}", chromosome);
-            eprintln!("{} comes before {}", error_pos, previous_pos);
+            eprintln!("Variant at position {} comes before {}", error_pos, previous_pos);
             eprintln!("Please sort positions in ascending order before running again");
         }
 
