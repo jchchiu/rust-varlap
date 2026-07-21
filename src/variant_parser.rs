@@ -14,19 +14,25 @@ pub fn parse(variants_path: &Path, varclass: &VarClass) -> Result<ParsedVariants
     let file_type = detect_file_type(variants_path)?;
 
     info!(
-        "Parsing variants from '{}' as {:?}",
+        "Parsing variants from {:?} as: {:?}",
         variants_path.display(),
         file_type
     );
 
     let mut variants: Vec<VariantInfo> = Vec::new();
 
+    let mut skipped = SkippedVariants::default();
+
     match file_type {
-        FileType::Vcf => parse_vcf(variants_path, varclass, &mut variants)?,
-        FileType::Csv | FileType::Tsv => parse_delimited(variants_path, file_type, varclass, &mut variants)?,
+        FileType::Vcf => parse_vcf(variants_path, varclass, &mut variants, &mut skipped)?,
+        FileType::Csv | FileType::Tsv => parse_delimited(variants_path, file_type, varclass, &mut variants, &mut skipped)?,
     };
 
-    info!("Parsed {} variants successfully", variants.len());
+    info!("Parsed variants successfully");
+    info!("Total number of variants in input: {}", skipped.total_variants(variants.len()));
+    info!("Number of variants parsed: {}", variants.len());
+    info!("Number of variants skipped: {}", skipped.skipped);
+    
     Ok(ParsedVariants { variants })
 }
 
@@ -64,6 +70,17 @@ fn detect_file_type(path: &Path) -> Result<FileType, AppError> {
             filename: path.to_path_buf(),
             extension: actual_ext.to_string(),
         }),
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+struct SkippedVariants {
+    skipped: usize,
+}
+
+impl SkippedVariants {
+    fn total_variants(&self, parsed_variants: usize) -> usize{
+        self.skipped + parsed_variants
     }
 }
 
@@ -105,6 +122,7 @@ fn parse_vcf(
     file_path: &Path,
     varclass: &VarClass,
     variants: &mut Vec<VariantInfo>,
+    skipped: &mut SkippedVariants,
 ) -> Result<()> {
     let input = open_variant_input(file_path)?;
     let reader = BufReader::new(input);
@@ -126,6 +144,7 @@ fn parse_vcf(
 
         if fields.len() < 5 {
             warn!("Skipping input row at line {}: {}", line_no + 1, line);
+            skipped.skipped += 1;
             continue;
         }
 
@@ -135,6 +154,7 @@ fn parse_vcf(
                 Ok(p) => p,
                 Err(err) => {
                     warn!("Invalid POS at line {}: {} ({err})", line_no + 1, line);
+                    skipped.skipped += 1;
                     continue;
                 }
             },
@@ -143,7 +163,7 @@ fn parse_vcf(
             line_no: line_no + 1,
         };
 
-        process_variant_row(&row, varclass, variants)?;
+        process_variant_row(&row, varclass, variants, skipped)?;
     }
 
     Ok(())
@@ -177,6 +197,7 @@ fn parse_delimited(
     file_type: FileType,
     varclass: &VarClass,
     variants: &mut Vec<VariantInfo>,
+    skipped: &mut SkippedVariants,
 ) -> Result<()> {
     let input = open_variant_input(file_path)?;
 
@@ -208,6 +229,7 @@ fn parse_delimited(
                 Some(v) if !v.trim().is_empty() => v.trim().to_string(),
                 _ => {
                     warn!("Missing CHROM at line {}", line_no);
+                    skipped.skipped += 1;
                     continue;
                 }
             },
@@ -215,6 +237,7 @@ fn parse_delimited(
                 Ok(p) => p,
                 Err(err) => {
                     warn!("Invalid POS at line {}: {:?} ({err})", line_no, record);
+                    skipped.skipped += 1;
                     continue;
                 }
             },
@@ -222,6 +245,7 @@ fn parse_delimited(
                 Some(v) if !v.trim().is_empty() => v.trim().to_string(),
                 _ => {
                     warn!("Missing REF at line {}", line_no);
+                    skipped.skipped += 1;
                     continue;
                 }
             },
@@ -231,13 +255,14 @@ fn parse_delimited(
                 }
                 _ => {
                     warn!("Missing ALT at line {}", line_no);
+                    skipped.skipped += 1;
                     continue;
                 }
             },
             line_no,
         };
 
-        process_variant_row(&row, varclass, variants)?;
+        process_variant_row(&row, varclass, variants, skipped)?;
     }
 
     Ok(())
@@ -246,8 +271,9 @@ fn parse_delimited(
 fn process_variant_row(
     row: &VariantRow, 
     varclass: &VarClass, 
-    variants: &mut Vec<VariantInfo>) 
--> Result<()> {
+    variants: &mut Vec<VariantInfo>,
+    skipped: &mut SkippedVariants,
+)-> Result<()> {
     for alt in &row.alts {
         let vartype = get_var_type(&row.refr, alt);
 
@@ -270,6 +296,8 @@ fn process_variant_row(
             };
             
             variants.push(variant);
+        } else {
+            skipped.skipped += 1;
         }
     }
 
