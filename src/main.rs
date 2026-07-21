@@ -19,7 +19,7 @@ fn run() -> Result<()> {
         variant_parser::parse(&args.variants, &args.varclass)?;
 
     let mut binned_variants =
-        binning::bin(&parsed_variants
+        binning::bin(&parsed_variants, args.gap
             // ,&args.reads, args.fasta.as_deref()
         )?;
 

@@ -7,7 +7,7 @@ use anyhow::Result;
 // use rust_htslib::bam::{Record, Read};
 use tracing::{info};
 
-// use crate::errors::AppError;
+use crate::errors::AppError;
 use crate::features::{LocusFeatures, LocusFeaturesIndel, LocusFeaturesSnv};
 // use crate::read_parser::{detect_file_type, FileType};
 use crate::variant::{BinnedVariants, ParsedVariants, VarType, Variant, VariantInfo, VariantBin};
@@ -16,6 +16,7 @@ pub fn bin<'a>(
     parsed_variants: &'a ParsedVariants,
     // reads_path: &Path,
     // fasta_path: Option<&Path>,
+    gap: Option<u64>,
 ) -> Result<BinnedVariants<'a>> {
     let mut bins: Vec<VariantBin> = Vec::new();
 
@@ -45,16 +46,21 @@ pub fn bin<'a>(
     //           Calculated Max Gap:       {:?}"
     //           , mean_read_len, max_hyperparameter, max_gap);
 
-    let default_gap = 100000u64;
+    // let default_gap = 100000u64;
 
-    info!("Set gap between bins as {:?}bp", default_gap);
+    // Use the gap provided, or set the bin size gap to default of 100kb
+    let gap = gap.unwrap_or(DEFAULT_GAP);
+
+    info!("Set gap between bins as {:?}bp", gap);
     
     for variant in &parsed_variants.variants {
         let should_append = if let Some(last_bin) = bins.last() {
             if last_bin.chrom != variant.chrom {
                 false
             } else if let Some(last_variant) = last_bin.variants.back() {
-                variant.pos.saturating_sub(last_variant.info.pos) <= default_gap
+                let distance = get_variant_distance(variant, &last_variant)?;
+
+                distance <= gap
             } else {
                 true
             }
@@ -81,6 +87,21 @@ pub fn bin<'a>(
     info!("Created {:?} bins for variants successfully", bins.len());
 
     Ok(BinnedVariants { bins })
+}
+
+const DEFAULT_GAP: u64 = 100_000;
+
+fn get_variant_distance(
+    current: &VariantInfo,
+    previous: &Variant,
+) -> Result<u64, AppError> {
+    current.pos
+        .checked_sub(previous.info.pos)
+        .ok_or_else(|| AppError::UnsortedVariants {
+            chromosome: current.chrom.clone(),
+            error_pos: current.pos,
+            previous_pos: previous.info.pos,
+        })
 }
 
 // fn estimate_mean_read_len(

@@ -36,6 +36,10 @@ pub struct Cli {
     /// Filepath of FASTA file associated with CRAM file (Required if reads is CRAM)
     #[arg(short, long)]
     pub fasta: Option<PathBuf>,
+
+    /// Optional bin size gap (if not provided will default to 100kb (100,000bp))
+    #[arg(long)]
+    pub gap: Option<u64>,
 }
 
 pub fn parse() -> Cli {

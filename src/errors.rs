@@ -16,6 +16,13 @@ pub enum AppError {
         extension: String,
     },
 
+    #[error("variants file is not sorted")]
+    UnsortedVariants  {
+        chromosome: String,
+        error_pos: u64,
+        previous_pos: u64,
+    },
+
     #[error("missing variants file extension")]
     MissingVariantsExtension {
         filename: PathBuf,
@@ -60,6 +67,7 @@ impl AppError {
         match self {
             AppError::UnsupportedVariantsFormat  { .. } => 3,
             AppError::UnsupportedReadsFormat  { .. } => 3,
+            AppError::UnsortedVariants { ..} => 3,
             AppError::MissingVariantsExtension { .. } => 3,
             AppError::MissingReadsExtension { .. } => 3,
             AppError::InvalidGzipName { .. } => 3,
@@ -96,6 +104,17 @@ pub fn print_error(program: &str, err: &AppError) {
             eprintln!("Supported formats are:");
             eprintln!("  .bam");
             eprintln!("  .cram");
+        }
+
+        AppError::UnsortedVariants {
+            chromosome,
+            error_pos,
+            previous_pos
+        } => {
+            eprintln!("{program} ERROR: variants are not sorted");
+            eprintln!("At chromosome: {}", chromosome);
+            eprintln!("{} comes before {}", error_pos, previous_pos);
+            eprintln!("Please sort positions in ascending order before running again");
         }
 
         AppError::MissingVariantsExtension { filename } => {
