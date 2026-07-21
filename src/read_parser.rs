@@ -5,7 +5,7 @@ use std::rc::Rc;
 use anyhow::{Context, Result};
 use csv::{WriterBuilder};
 use rust_htslib::bam::{Read, IndexedReader, Record};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::errors::AppError;
 use crate::output::{write_variant_row, write_header};
@@ -121,6 +121,8 @@ pub fn parse_region(
             .context("Failed to flush output CSV to disk")?;
     }
 
+    info!("Parsed reads successfully");
+
     Ok(())
 }
 
@@ -160,11 +162,13 @@ struct ChromInfo {
 fn get_chrom_info(variants: &VecDeque<Variant>) -> ChromInfo {
     let first = variants
         .front()
-        .expect("Internal error: chromosome contains no variants");
+        .expect("Internal error: chromosome contains no variants.
+                 INVARIANT BROKEN: a bin with a given chromosome should ALWAYS contain at least one variant");
 
     let last = variants
         .back()
-        .expect("Internal error: chromosome contains no variants");
+        .expect("Internal error: chromosome contains no variants.
+                 INVARIANT BROKEN: a bin with a given chromosome should ALWAYS contain at least one variant");
 
     ChromInfo {
         min_pos: first.info.pos,

@@ -8,6 +8,7 @@ mod variant;
 mod variant_parser;
 
 use anyhow::Result;
+use tracing::info;
 
 use crate::errors::{AppError, print_error};
 
@@ -18,7 +19,9 @@ fn run() -> Result<()> {
         variant_parser::parse(&args.variants, &args.varclass)?;
 
     let mut binned_variants =
-        binning::bin(&parsed_variants)?;
+        binning::bin(&parsed_variants
+            // ,&args.reads, args.fasta.as_deref()
+        )?;
 
     read_parser::parse_region(
         &mut binned_variants, 
@@ -34,6 +37,8 @@ fn run() -> Result<()> {
 }
 
 fn main() {
+    tracing_subscriber::fmt().init();
+
     if let Err(err) = run() {
         let program = env!("CARGO_PKG_NAME");
 
@@ -46,4 +51,6 @@ fn main() {
         eprintln!("{program} ERROR: {:#}", err);
         std::process::exit(1);
     }
+
+    info!("rust-varlap has completed successfully");
 }
