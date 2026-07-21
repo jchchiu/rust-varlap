@@ -21,8 +21,7 @@ pub fn parse_region(
     fasta_path: Option<&Path>,
     // ADD vector of [chrom/first variant index/length] here
 ) -> Result<()> {
-    let file_type = detect_file_type(reads_path)
-        .with_context(|| format!("Failed to detect reads file type for '{}'", reads_path.display()))?;
+    let file_type = detect_file_type(reads_path)?;
     
     let mut csv_writer = WriterBuilder::new()
         .has_headers(false)

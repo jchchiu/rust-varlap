@@ -11,13 +11,7 @@ use crate::errors::AppError;
 use crate::variant::{VariantInfo, VarClass, VarType, ParsedVariants};
 
 pub fn parse(variants_path: &Path, varclass: &VarClass) -> Result<ParsedVariants> {
-    let file_type = detect_file_type(variants_path)
-        .with_context(||
-            format!(
-                "Failed to detect variants file type for '{}'",
-                variants_path.display()
-            )
-        )?;
+    let file_type = detect_file_type(variants_path)?;
 
     info!(
         "Parsing variants from '{}' as {:?}",
