@@ -1,27 +1,33 @@
-use clap::ValueEnum;
-use crate::features::{LocusFeatures, NormalizedLocusFeaturesRow, AlleleCountsSnvStats, AlleleCountsIndelStats};
-use std::rc::Rc;
-use rust_htslib::bam::{Record};
 use std::collections::VecDeque;
+
+use clap::ValueEnum;
+use rust_htslib::bam::{Record};
+
+use crate::features::{LocusFeatures, NormalizedLocusFeaturesRow, AlleleCountsSnvStats, AlleleCountsIndelStats};
+
+#[derive(Debug, Clone)]
+pub struct VariantInfo {
+    pub chrom: String,
+    pub pos: u64,
+    pub refr: String,
+    pub alt: String,
+    pub vartype: VarType,
+}
 
 // NOTE: 
 // If we want to process multiple BAMs, we should move the features out
 //  of the variant struct (maybe VariantInfo and VariantFeat structs)
 //  where VariantFeat has an immutable lifetime borrow of VariantInfo
 #[derive(Debug, Clone)]
-pub struct Variant {
-	pub chrom: String,
-	pub pos: u64,
-	pub refr: String,
-	pub alt: String,
-    pub vartype: VarType,
+pub struct Variant<'a> {
+    pub info: &'a VariantInfo,
     pub features: LocusFeatures,
 }
 
-impl Variant {
+impl <'a> Variant<'a> {
     pub fn base_counts_stats(&self) -> Option<AlleleCountsSnvStats> {
-        let ref_char = self.refr.chars().next()?;
-        let alt_char = self.alt.chars().next()?;
+        let ref_char = self.info.refr.chars().next()?;
+        let alt_char = self.info.alt.chars().next()?;
 
         match &self.features {
             LocusFeatures::Snv(f) => Some(f.base_counts.stats(ref_char, alt_char)),
@@ -36,19 +42,26 @@ impl Variant {
         }
     }
 
-    pub fn count_locus_features(&mut self, read: &Rc<Record>, ref_pos: u64) {
+    pub fn count_locus_features(&mut self, read: &Record, ref_pos: u64) {
         let qpos = self.ref_pos_to_query_pos(read, ref_pos);
 
         match &mut self.features {
             LocusFeatures::Snv(f) => {
                 if let (Some(refr_char), Some(alt_char)) =
-                    (self.refr.chars().next(), self.alt.chars().next())
+                    (self.info.refr.chars().next(), self.info.alt.chars().next())
                 {
                     f.count(read, refr_char, alt_char, qpos);
                 }
             }
             LocusFeatures::Indel(f) => {
-                f.count(read, &self.refr, &self.alt, ref_pos, qpos, &self.vartype);
+                f.count(
+                    read,
+                    &self.info.refr,
+                    &self.info.alt,
+                    ref_pos,
+                    qpos,
+                    &self.info.vartype,
+                );
             }
         }
     }
@@ -57,13 +70,13 @@ impl Variant {
         self.features.normalized_row()
     }
 
-    pub fn get_pos_fraction(&self, ref_seq_len: u64) -> f64 {
-        self.pos as f64/ ref_seq_len as f64
+    pub fn get_pos_normalized(&self, ref_seq_len: u64) -> f64 {
+        self.info.pos as f64 / ref_seq_len as f64
     }
 
-    pub fn ref_pos_to_query_pos (&self, read: &Record, target_pos: u64) -> Option<u32> {
+    pub fn ref_pos_to_query_pos(&self, read: &Record, target_pos: u64) -> Option<u32> {
         let cigar = read.cigar();
-        Some(cigar.read_pos(target_pos as u32, false, false).ok()?)?
+        cigar.read_pos(target_pos as u32, false, false).ok()?
     }
 }
 
@@ -95,12 +108,17 @@ impl VarType {
 }
 
 #[derive(Debug, Clone)]
-pub struct ChromBucket {
+pub struct VariantBin<'a> {
     pub chrom: String,
-    pub variants: VecDeque<Variant>,
+    pub variants: VecDeque<Variant<'a>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ParsedVariants  {
-    pub chroms: Vec<ChromBucket>,
+    pub variants: Vec<VariantInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BinnedVariants<'a> {
+    pub bins: Vec<VariantBin<'a>>,
 }

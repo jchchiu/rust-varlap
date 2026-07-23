@@ -1,5 +1,6 @@
-use clap::Parser;
 use std::path::PathBuf;
+
+use clap::Parser;
 
 use crate::variant::VarClass;
 
@@ -8,33 +9,37 @@ use crate::variant::VarClass;
 #[command(version = "0.0.1")]
 #[command(about = "Quality control tool for genetic variants")]
 pub struct Cli {
-    /// Input variant file path (can be vcf, csv, tsv and be gzipped (.gz))
+    /// Filepath of variants (Supported: vcf, vcf.gz, csv, tsv)
     #[arg(short, long)]
-    pub variant_file: PathBuf,
+    pub variants: PathBuf,
 
-    /// Filepaths of BAM files
+    /// Filepath of reads (Supported: bam, cram)
     #[arg(short, long)]
-    pub bam_file: PathBuf,
+    pub reads: PathBuf,
 
-    /// Type of variants to consider. Options: snv, indel
+    /// Class of variants to consider for analysis (Options: snv, indel)
     #[arg(long, value_enum)]
     pub varclass: VarClass,
 
-    /// Filepath of where csv output should be stored
+    /// Filepath of where csv output should be stored and filename of output
     #[arg(short, long)]
-    pub output_path: String,
+    pub output: PathBuf,
 
     /// Optional sample identifier
     #[arg(long)]
     pub sample: Option<String>,
 
-    /// Optional label for bam files (if not provided will default to name of bam file)
+    /// Optional label for reads file (if not provided will default to name of reads file)
     #[arg(long)]
     pub label: Option<String>,
 
-    /// Required for CRAM: Filepath of FASTA file associated with CRAM file
+    /// Filepath of FASTA file associated with CRAM file (Required if reads is CRAM)
     #[arg(short, long)]
-    pub fasta_file: Option<PathBuf>,
+    pub fasta: Option<PathBuf>,
+
+    /// Optional bin size gap (if not provided will default to 100 kb (100,000 bp))
+    #[arg(long)]
+    pub gap: Option<u64>,
 }
 
 pub fn parse() -> Cli {

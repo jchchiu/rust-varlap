@@ -1,9 +1,9 @@
 use std::fs::File;
 use std::path::Path;
+
+use anyhow::{Context, Result};
 use csv::Writer;
 use serde::Serialize;
-use std::error::Error;
-use anyhow::{Context, Result};
 
 use crate::features::{LocusFeatures, NormalizedLocusFeaturesRow};
 use crate::variant::{Variant, VarClass};
@@ -40,7 +40,8 @@ pub fn write_header(
             .iter()
             .copied()
             .chain(labelled_dynamic.iter().map(String::as_str)),
-    )?;
+    )
+    .context("Failed to write CSV header")?;
 
     Ok(())
 }
@@ -48,10 +49,16 @@ pub fn write_header(
 pub fn write_variant_row(
     writer: &mut Writer<File>,
     var: &Variant,
-    pos_fraction: f64,
+    pos_normalized: f64,
     sample: Option<&str>,
-) -> Result<(), Box<dyn Error>> {
-    writer.serialize(OutputRow::from_variant(var, pos_fraction, sample))?;
+) -> Result<()> {
+    writer.serialize(OutputRow::from_variant(var, pos_normalized, sample))
+        .with_context(||
+            format!(
+                "Failed to write variant '{}:{}' to output CSV",
+                var.info.chrom, var.info.pos
+            )
+        )?;
 
     Ok(())
 }
@@ -67,7 +74,7 @@ struct OutputReadFeatures {
     ref_forward_strand: Option<f64>,
     ref_reverse_strand: Option<f64>,
     ref_supplementary: Option<f64>,
-    ref_normalised_read_position: Option<f64>,
+    ref_normalized_read_position: Option<f64>,
 
     alt_nm: Option<f64>,
     alt_base_qual: Option<f64>,
@@ -78,7 +85,7 @@ struct OutputReadFeatures {
     alt_forward_strand: Option<f64>,
     alt_reverse_strand: Option<f64>,
     alt_supplementary: Option<f64>,
-    alt_normalised_read_position: Option<f64>,
+    alt_normalized_read_position: Option<f64>,
 
     all_nm: Option<f64>,
     all_base_qual: Option<f64>,
@@ -89,7 +96,7 @@ struct OutputReadFeatures {
     all_forward_strand: Option<f64>,
     all_reverse_strand: Option<f64>,
     all_supplementary: Option<f64>,
-    all_normalised_read_position: Option<f64>,
+    all_normalized_read_position: Option<f64>,
 }
 
 impl From<NormalizedLocusFeaturesRow> for OutputReadFeatures {
@@ -104,7 +111,7 @@ impl From<NormalizedLocusFeaturesRow> for OutputReadFeatures {
             ref_forward_strand: rf.ref_forward_strand,
             ref_reverse_strand: rf.ref_reverse_strand,
             ref_supplementary: rf.ref_supplementary,
-            ref_normalised_read_position: rf.ref_normalised_read_position,
+            ref_normalized_read_position: rf.ref_normalized_read_position,
 
             alt_nm: rf.alt_nm,
             alt_base_qual: rf.alt_base_qual,
@@ -115,7 +122,7 @@ impl From<NormalizedLocusFeaturesRow> for OutputReadFeatures {
             alt_forward_strand: rf.alt_forward_strand,
             alt_reverse_strand: rf.alt_reverse_strand,
             alt_supplementary: rf.alt_supplementary,
-            alt_normalised_read_position: rf.alt_normalised_read_position,
+            alt_normalized_read_position: rf.alt_normalized_read_position,
 
             all_nm: rf.all_nm,
             all_base_qual: rf.all_base_qual,
@@ -126,7 +133,7 @@ impl From<NormalizedLocusFeaturesRow> for OutputReadFeatures {
             all_forward_strand: rf.all_forward_strand,
             all_reverse_strand: rf.all_reverse_strand,
             all_supplementary: rf.all_supplementary,
-            all_normalised_read_position: rf.all_normalised_read_position,
+            all_normalized_read_position: rf.all_normalized_read_position,
         }
     }
 }
@@ -138,10 +145,10 @@ enum OutputRow<'a> {
 }
 
 impl<'a> OutputRow<'a> {
-    fn from_variant(var: &'a Variant, pos_fraction: f64, sample: Option<&'a str>) -> Self {
+    fn from_variant(var: &'a Variant, pos_normalized: f64, sample: Option<&'a str>) -> Self {
         match &var.features {
-            LocusFeatures::Snv(_) => OutputRow::Snv(OutputRowSNV::from_variant(var, pos_fraction, sample)),
-            LocusFeatures::Indel(_) => OutputRow::Indel(OutputRowINDEL::from_variant(var, pos_fraction, sample)),
+            LocusFeatures::Snv(_) => OutputRow::Snv(OutputRowSNV::from_variant(var, pos_normalized, sample)),
+            LocusFeatures::Indel(_) => OutputRow::Indel(OutputRowINDEL::from_variant(var, pos_normalized, sample)),
         }
     }
 }
@@ -150,11 +157,10 @@ impl<'a> OutputRow<'a> {
 struct OutputRowSNV<'a> {
     chrom: &'a str,
     pos: u64,
-    #[serde(rename = "ref")]
     refr: &'a str,
     alt: &'a str,
     vartype: &'a str,
-    pos_normalised: f64,
+    pos_normalized: f64,
     sample: Option<&'a str>,
     depth: u32,
 
@@ -171,9 +177,8 @@ struct OutputRowSNV<'a> {
     read_features: OutputReadFeatures,
 }
 
-// Make branching for snv/indel; make common function for read_features
 impl<'a> OutputRowSNV<'a> {
-    fn from_variant(var: &'a Variant, pos_fraction: f64, sample: Option<&'a str>) -> Self {
+    fn from_variant(var: &'a Variant, pos_normalized: f64, sample: Option<&'a str>) -> Self {
         let bcs = var.base_counts_stats().expect("Could not get base count statistics.");
         let read_features = OutputReadFeatures::from(var.normalized_row());
 
@@ -183,13 +188,13 @@ impl<'a> OutputRowSNV<'a> {
         };
 
         Self {
-            chrom: &var.chrom,
-            pos: var.pos,
-            refr: &var.refr,
-            alt: &var.alt,
-            vartype: &var.vartype.as_str(),
-            pos_normalised: pos_fraction,
-            sample: sample,
+            chrom: &var.info.chrom,
+            pos: var.info.pos,
+            refr: &var.info.refr,
+            alt: &var.info.alt,
+            vartype: var.info.vartype.as_str(),
+            pos_normalized,
+            sample,
             depth: bcs.depth,
             
             count_a: f.base_counts.a,
@@ -211,11 +216,10 @@ impl<'a> OutputRowSNV<'a> {
 struct OutputRowINDEL<'a> {
     chrom: &'a str,
     pos: u64,
-    #[serde(rename = "ref")]
     refr: &'a str,
     alt: &'a str,
     vartype: &'a str,
-    pos_normalised: f64,
+    pos_normalized: f64,
     sample: Option<&'a str>,
     depth: u32,
 
@@ -228,21 +232,20 @@ struct OutputRowINDEL<'a> {
     read_features: OutputReadFeatures,
 }
 
-// Make branching for snv/indel; make common function for read_features
 impl<'a> OutputRowINDEL<'a> {
-    fn from_variant(var: &'a Variant, pos_fraction: f64, sample: Option<&'a str>) -> Self {
+    fn from_variant(var: &'a Variant, pos_normalized: f64, sample: Option<&'a str>) -> Self {
         let read_features = OutputReadFeatures::from(var.normalized_row());
 
         let stats = var.indel_stats().expect("Could not get indel count statistics.");
 
         Self {
-            chrom: &var.chrom,
-            pos: var.pos,
-            refr: &var.refr,
-            alt: &var.alt,
-            vartype: &var.vartype.as_str(),
-            pos_normalised: pos_fraction,
-            sample: sample,
+            chrom: &var.info.chrom,
+            pos: var.info.pos,
+            refr: &var.info.refr,
+            alt: &var.info.alt,
+            vartype: var.info.vartype.as_str(),
+            pos_normalized,
+            sample,
             depth: stats.depth,
 
             ref_count: stats.ref_count,
@@ -263,7 +266,7 @@ const HEADER_FIELDS_SHARED: &[&str] = &[
     "ref",
     "alt",
     "vartype",
-    "pos_normalised",
+    "pos_normalized",
     "sample",
 ];
 
@@ -286,7 +289,7 @@ const HEADER_FIELDS_SNV: &[&str] = &[
     "ref_forward_strand",
     "ref_reverse_strand",
     "ref_supplementary",
-    "ref_normalised_read_position",
+    "ref_normalized_read_position",
     "alt_avg_nm",
     "alt_avg_base_qual",
     "alt_avg_map_qual",
@@ -296,7 +299,7 @@ const HEADER_FIELDS_SNV: &[&str] = &[
     "alt_forward_strand",
     "alt_reverse_strand",
     "alt_supplementary",
-    "alt_normalised_read_position",
+    "alt_normalized_read_position",
     "all_avg_nm",
     "all_avg_base_qual",
     "all_avg_map_qual",
@@ -306,7 +309,7 @@ const HEADER_FIELDS_SNV: &[&str] = &[
     "all_forward_strand",
     "all_reverse_strand",
     "all_supplementary",
-    "all_normalised_read_position",
+    "all_normalized_read_position",
 ];
 
 const HEADER_FIELDS_INDEL: &[&str] = &[
@@ -325,7 +328,7 @@ const HEADER_FIELDS_INDEL: &[&str] = &[
     "ref_forward_strand",
     "ref_reverse_strand",
     "ref_supplementary",
-    "ref_normalised_read_position",
+    "ref_normalized_read_position",
     "alt_avg_nm",
     "alt_avg_base_qual",
     "alt_avg_map_qual",
@@ -335,7 +338,7 @@ const HEADER_FIELDS_INDEL: &[&str] = &[
     "alt_forward_strand",
     "alt_reverse_strand",
     "alt_supplementary",
-    "alt_normalised_read_position",
+    "alt_normalized_read_position",
     "all_avg_nm",
     "all_avg_base_qual",
     "all_avg_map_qual",
@@ -345,5 +348,5 @@ const HEADER_FIELDS_INDEL: &[&str] = &[
     "all_forward_strand",
     "all_reverse_strand",
     "all_supplementary",
-    "all_normalised_read_position",
+    "all_normalized_read_position",
 ];

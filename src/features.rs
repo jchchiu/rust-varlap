@@ -1,9 +1,8 @@
-use std::rc::Rc;
 use std::cmp;
 
-use serde::Serialize;
 use rust_htslib::bam::Record;
 use rust_htslib::bam::record::{Aux, Cigar};
+use serde::Serialize;
 
 use crate::variant::VarType;
 
@@ -45,7 +44,7 @@ impl CommonLocusFeatures {
             ref_forward_strand: r.forward_strand,
             ref_reverse_strand: r.reverse_strand,
             ref_supplementary: r.supplementary,
-            ref_normalised_read_position: r.normalised_read_position,
+            ref_normalized_read_position: r.normalized_read_position,
 
             alt_nm: a.nm,
             alt_base_qual: a.base_qual,
@@ -56,7 +55,7 @@ impl CommonLocusFeatures {
             alt_forward_strand: a.forward_strand,
             alt_reverse_strand: a.reverse_strand,
             alt_supplementary: a.supplementary,
-            alt_normalised_read_position: a.normalised_read_position,
+            alt_normalized_read_position: a.normalized_read_position,
 
             all_nm: all.nm,
             all_base_qual: all.base_qual,
@@ -67,7 +66,7 @@ impl CommonLocusFeatures {
             all_forward_strand: all.forward_strand,
             all_reverse_strand: all.reverse_strand,
             all_supplementary: all.supplementary,
-            all_normalised_read_position: all.normalised_read_position,
+            all_normalized_read_position: all.normalized_read_position,
         }
     }    
 }
@@ -81,7 +80,7 @@ pub struct LocusFeaturesSnv {
 impl LocusFeaturesSnv {
     pub fn count(
         &mut self,
-        read: &Rc<Record>,
+        read: &Record,
         refr: char,
         alt: char,
         query_pos: Option<u32>,
@@ -108,7 +107,7 @@ impl LocusFeaturesSnv {
             }
         }
 
-        self.common.all_read_features.count(&read, query_pos);
+        self.common.all_read_features.count(read, query_pos);
     }
 }
 
@@ -129,7 +128,7 @@ pub struct LocusFeaturesIndel {
 impl LocusFeaturesIndel {
     pub fn count(
         &mut self,
-        read: &Rc<Record>,
+        read: &Record,
         refr: &str,
         alt: &str,
         ref_pos: u64,
@@ -140,28 +139,19 @@ impl LocusFeaturesIndel {
         let size = refr.len().abs_diff(alt.len()) as u64;
         let end = start + size - 1;
 
-        let overlapping_indels = self.indels_overlapping_variant(&read, start, end);
+        let overlapping_indels = self.indels_overlapping_variant(read, start, end);
         self.overlapping_indels_count += overlapping_indels.len() as u64;
 
-        let mut read_supports_alt = false;
-
-        let bases = match indel_type {
-            VarType::Del => Some(String::new()),
-            VarType::Ins => Some(alt[1..].to_string()),
-            _ => None,
-        };
-
-        for event in overlapping_indels.iter() {
-            if event.indel_type == *indel_type {
-                if (event.start == start) && (event.end == end) {
-                    if matches!(indel_type, VarType::Del) ||           // FIX UNWRAP HERE
-                    (matches!(indel_type, VarType::Ins) && event.bases == bases.clone().unwrap()) {
-                        read_supports_alt = true;
-                        break;
-                    }
+        let read_supports_alt = overlapping_indels.iter().any(|event| {
+            event.indel_type == *indel_type
+                && event.start == start
+                && event.end == end
+                && match indel_type {
+                    VarType::Del => true,
+                    VarType::Ins => event.bases == alt[1..],
+                    _ => false,
                 }
-            }
-        }
+        });
 
         let mut read_supports_ref = false;
         if overlapping_indels.is_empty() && let Some(qpos) = query_pos {
@@ -175,10 +165,10 @@ impl LocusFeaturesIndel {
                 VarType::Del => {
                     // TEMP FIX: In python if string slice is out of bounds then it 
                     // truncates end value to length of vector
-                    // NOTE: MAY NEED TO REWRITE THIS PART; ALSO HOW WE GET QPOS (IS IT EQUIVALENT TO PYTHON CODE?)
+                    // NOTE: MAY NEED TO REWRITE THIS PART
                     if (qpos + (size as u32) + 1) as usize > seq_bytes.len() {
                         Some(String::from_utf8(
-                            seq_bytes[qpos as usize .. seq_bytes.len() as usize].to_vec()
+                            seq_bytes[qpos as usize .. seq_bytes.len()].to_vec()
                         )
                         .unwrap()
                         .to_ascii_uppercase())
@@ -195,9 +185,10 @@ impl LocusFeaturesIndel {
             };
             
             // FIX UNWRAP HERE
-            if refr == read_bases.unwrap() {
-                read_supports_ref = true;
-            }
+            if let Some(read_bases) = read_bases
+                && refr == read_bases {
+                    read_supports_ref = true;
+                }
         }
 
         if read_supports_ref {
@@ -206,7 +197,7 @@ impl LocusFeaturesIndel {
             self.common.alt_read_features.count(read, query_pos);
         }
 
-        self.common.all_read_features.count(&read, query_pos);
+        self.common.all_read_features.count(read, query_pos);
     }
 
     // get the genome coordinates of where an INDEL variant will actually
@@ -227,12 +218,12 @@ impl LocusFeaturesIndel {
     // Determine the allele in the read at the locus of an INDEL variant
     pub fn indels_overlapping_variant(
         &self,
-        read: &Rc<Record>,
+        read: &Record,
         var_start: u64,
         var_end: u64,
     ) -> Vec<IndelEvent> {
-        let mut read_pos: u32 = 0;
-        let mut ref_pos = read.pos() as u32;
+        let mut read_pos: u64 = 0;
+        let mut ref_pos = read.pos() as u64;
         let mut result = Vec::new();
 
         // See https://samtools.github.io/hts-specs/SAMv1.pdf page 8 for how CIGAR consumes
@@ -240,18 +231,18 @@ impl LocusFeaturesIndel {
             match *c {
                 // Consumes both reference and query
                 Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
-                    ref_pos += len;
-                    read_pos += len;
+                    ref_pos += len as u64;
+                    read_pos += len as u64;
                 }
                 // Only consumes query
                 Cigar::Ins(len) => {
-                    let this_start = ref_pos as u64;
+                    let this_start = ref_pos;
                     let this_end = this_start + len as u64 - 1;
 
                     if self.interval_overlaps(var_start, var_end, this_start, this_end) {
                         let seq_bytes = read.seq().as_bytes();
                         let inserted_bases = String::from_utf8(
-                            seq_bytes[read_pos as usize .. (read_pos + len) as usize].to_vec()
+                            seq_bytes[read_pos as usize .. (read_pos + len as u64) as usize].to_vec()
                         )
                         .unwrap()
                         .to_ascii_uppercase();
@@ -264,11 +255,11 @@ impl LocusFeaturesIndel {
                         });
                     }
 
-                    read_pos += len;
+                    read_pos += len as u64;
                 }
                 // Only consumes reference
                 Cigar::Del(len) => {
-                    let this_start = ref_pos as u64;
+                    let this_start = ref_pos;
                     let this_end = this_start + len as u64 - 1;
 
                     if self.interval_overlaps(var_start, var_end, this_start, this_end) {
@@ -280,15 +271,15 @@ impl LocusFeaturesIndel {
                         });
                     }
 
-                    ref_pos += len;
+                    ref_pos += len as u64;
                 }
                 // Only consumes reference
                 Cigar::RefSkip(len) => {
-                    ref_pos += len;
+                    ref_pos += len as u64;
                 }
                 // Only consumes query
                 Cigar::SoftClip(len) => {
-                    read_pos += len;
+                    read_pos += len as u64;
                 }
                 // Consumes neither reference nor query
                 Cigar::HardClip(_) | Cigar::Pad(_) => {}
@@ -297,7 +288,6 @@ impl LocusFeaturesIndel {
 
         result
     }
-
 }
 
 impl LocusFeaturesIndel {
@@ -365,12 +355,12 @@ impl AlleleCountsSnv {
         }
     }
 
-    // fn depth(&self) -> u32 {
-    //     self.a + self.c + self.g + self.t + self.n
-    // }
+    fn depth(&self) -> u32 {
+        self.a + self.c + self.g + self.t + self.n
+    }
 
     pub fn stats(&self, refr: char, alt: char) -> AlleleCountsSnvStats {
-        let depth = self.a + self.c + self.g + self.t + self.n;
+        let depth = self.depth();
         let ref_count = self.count_for_base(refr);
         let alt_count = self.count_for_base(alt);
         let alt_vaf = if depth > 0 {
@@ -398,68 +388,68 @@ pub struct AlleleCountsSnvStats {
 
 #[derive(Debug, Clone, Default)]
 pub struct ReadFeatures {
-    pub nm: u32,
-    pub base_qual: u32,
-    pub map_qual: u32,
-    pub align_len: u32,
-    pub clipping: u32,
-    pub indel: u32,
+    pub nm: u64,
+    pub base_qual: u64,
+    pub map_qual: u64,
+    pub align_len: u64,
+    pub clipping: u64,
+    pub indel: u64,
     pub forward_strand: u32,
     pub reverse_strand: u32,
     pub supplementary: u32,
-    pub normalised_read_position: f64, 
+    pub normalized_read_position: f64, 
     pub num_reads: u32,
 }
 
 impl ReadFeatures {
     pub fn count(
         &mut self,
-        read: &Rc<Record>,
+        read: &Record,
         query_pos: Option<u32>,
     ) {
         // Instead of counting num of reads, can create a function that sums foward and reverse strand?
         self.num_reads += 1;
-        let query_len = read.seq_len() as usize;
+        let query_len = read.seq_len();
 
         if let Some(qpos) = query_pos {
             if query_len > 0 {
-                self.normalised_read_position += qpos as f64 / query_len as f64;
+                self.normalized_read_position += qpos as f64 / query_len as f64;
             }
 
             let qpos_usize = qpos as usize;
             if qpos_usize < read.qual().len() {
                 let pos_qual = read.qual()[qpos_usize];
-                self.base_qual += pos_qual as u32;
+                self.base_qual += pos_qual as u64;
             }
         }
 
-        self.align_len += self.query_alignment_length(&read) as u32;
-        self.map_qual += read.mapq() as u32;
+        self.align_len += self.query_alignment_length(read);
+        self.map_qual += read.mapq() as u64;
 
         for c in read.cigar().iter() {
             match *c {
-                Cigar::Ins(len) | Cigar::Del(len) => self.indel += len as u32,
-                Cigar::SoftClip(len) | Cigar::HardClip(len) => self.clipping += len as u32,
+                Cigar::Ins(len) | Cigar::Del(len) => self.indel += len as u64,
+                Cigar::SoftClip(len) | Cigar::HardClip(len) => self.clipping += len as u64,
                 _ => {}
             }
         }
 
         if let Ok(aux) = read.aux(b"NM") {
             match aux {
-                Aux::U8(v) => self.nm += v as u32,
-                Aux::U16(v) => self.nm += v as u32,
-                Aux::U32(v) => self.nm += v as u32,
+                Aux::U8(v) => self.nm += v as u64,
+                Aux::U16(v) => self.nm += v as u64,
+                Aux::U32(v) => self.nm += v as u64,
                 Aux::I8(v) => {
                     if v > 0 {
-                        self.nm += v as u32}
+                        self.nm += v as u64}
                     },
                 Aux::I16(v) => {
                     if v > 0 {
-                        self.nm += v as u32}
+                        self.nm += v as u64}
                     },
                 Aux::I32(v) => {
                     if v > 0 {
-                        self.nm += v as u32}
+                        self.nm += v as u64}
                     },
                 _ => {}
             }
@@ -476,11 +466,11 @@ impl ReadFeatures {
 
     }
 
-    pub fn query_alignment_length(&self, record: &Rc<Record>) -> u32 {
-        let mut len = 0;
+    pub fn query_alignment_length(&self, record: &Record) -> u64 {
+        let mut len: u64 = 0;
         for c in record.cigar().iter() {
             match *c {
-                Cigar::Match(l) | Cigar::Equal(l) | Cigar::Diff(l) | Cigar::Ins(l) => len += l,
+                Cigar::Match(l) | Cigar::Equal(l) | Cigar::Diff(l) | Cigar::Ins(l) => len += l as u64,
                 _ => {}
             }
         }
@@ -500,7 +490,7 @@ impl ReadFeatures {
                 forward_strand: Some(self.forward_strand as f64 / n),
                 reverse_strand: Some(self.reverse_strand as f64 / n),
                 supplementary: Some(self.supplementary as f64 / n),
-                normalised_read_position: Some(self.normalised_read_position / n),
+                normalized_read_position: Some(self.normalized_read_position / n),
             }
         } else {
             NormalizedReadFeatures::default()
@@ -508,7 +498,7 @@ impl ReadFeatures {
     }
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct NormalizedLocusFeaturesRow {
     pub ref_nm: Option<f64>,
     pub ref_base_qual: Option<f64>,
@@ -519,7 +509,7 @@ pub struct NormalizedLocusFeaturesRow {
     pub ref_forward_strand: Option<f64>,
     pub ref_reverse_strand: Option<f64>,
     pub ref_supplementary: Option<f64>,
-    pub ref_normalised_read_position: Option<f64>,
+    pub ref_normalized_read_position: Option<f64>,
 
     pub alt_nm: Option<f64>,
     pub alt_base_qual: Option<f64>,
@@ -530,7 +520,7 @@ pub struct NormalizedLocusFeaturesRow {
     pub alt_forward_strand: Option<f64>,
     pub alt_reverse_strand: Option<f64>,
     pub alt_supplementary: Option<f64>,
-    pub alt_normalised_read_position: Option<f64>,
+    pub alt_normalized_read_position: Option<f64>,
 
     pub all_nm: Option<f64>,
     pub all_base_qual: Option<f64>,
@@ -541,12 +531,10 @@ pub struct NormalizedLocusFeaturesRow {
     pub all_forward_strand: Option<f64>,
     pub all_reverse_strand: Option<f64>,
     pub all_supplementary: Option<f64>,
-    pub all_normalised_read_position: Option<f64>,
+    pub all_normalized_read_position: Option<f64>,
 }
 
-// Use option or not? Because in python script if there are no values it defaults to ''
-// Compared to default which would initialize it as 0.0
-#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct NormalizedReadFeatures {
     pub nm: Option<f64>,
     pub base_qual: Option<f64>,
@@ -557,5 +545,5 @@ pub struct NormalizedReadFeatures {
     pub forward_strand: Option<f64>,
     pub reverse_strand: Option<f64>,
     pub supplementary: Option<f64>,
-    pub normalised_read_position: Option<f64>,
+    pub normalized_read_position: Option<f64>,
 }
