@@ -55,6 +55,7 @@ pub fn bin<'a>(
             gap
         }
         None => {
+            // Can maybe change it so that a value of -1 has no gap? (just parses whole chromosome)
             info!("Using default bin gap: {} bp", DEFAULT_GAP);
             DEFAULT_GAP
         }

@@ -36,3 +36,4 @@ rust-varlap is a rewrite of [varlap](https://github.com/bjpop/varlap) from pytho
 - Implement multithreading
 - Deal with paired reads (implement something similar to mosdepth?)
 - Add option to sort variants if unsorted
+- Make ref/alt input optional (Still output stats that do not need this info)
