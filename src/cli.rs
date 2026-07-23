@@ -29,10 +29,6 @@ pub struct Cli {
     #[arg(long)]
     pub sample: Option<String>,
 
-    /// Optional label for bam files (if not provided will default to name of bam file)
-    #[arg(long)]
-    pub label: Option<String>,
-
     /// Optional label for reads file (if not provided will default to name of reads file)
     #[arg(long)]
     pub label: Option<String>,
