@@ -66,7 +66,7 @@ pub fn bin<'a>(
             if last_bin.chrom != variant.chrom {
                 false
             } else if let Some(last_variant) = last_bin.variants.back() {
-                let distance = get_variant_distance(variant, &last_variant)?;
+                let distance = get_variant_distance(variant, last_variant)?;
 
                 distance <= gap
             } else {
