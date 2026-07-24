@@ -147,3 +147,185 @@ fn make_variant_features<'a>(variant: &'a VariantInfo) -> Variant<'a> {
         VarType::Unknown => unreachable!(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn variant(chrom: &str, pos: u64, vartype: VarType) -> VariantInfo {
+        VariantInfo {
+            chrom: chrom.to_string(),
+            pos,
+            vartype,
+            refr: "A".into(),
+            alt: "T".into(),
+        }
+    }
+
+    fn parsed(variants: Vec<VariantInfo>) -> ParsedVariants {
+        ParsedVariants { variants }
+    }
+
+    // Variant feeature tests
+    #[test]
+    fn make_variant_features_creates_snv() {
+        let v = variant("chr1", 100, VarType::Snv);
+
+        let result = make_variant_features(&v);
+
+        assert!(matches!(result.features, LocusFeatures::Snv(_)));
+        assert_eq!(result.info.pos, 100);
+    }
+
+    #[test]
+    fn make_variant_features_creates_indel_for_insertions() {
+        let v = variant("chr1", 100, VarType::Ins);
+
+        let result = make_variant_features(&v);
+
+        assert!(matches!(result.features, LocusFeatures::Indel(_)));
+    }
+
+    #[test]
+    fn make_variant_features_creates_indel_for_deletions() {
+        let v = variant("chr1", 100, VarType::Del);
+
+        let result = make_variant_features(&v);
+
+        assert!(matches!(result.features, LocusFeatures::Indel(_)));
+    }
+
+    // Variant distance tests
+    #[test]
+    fn variant_distance_returns_difference() {
+        let previous_variant = variant("chr1", 100, VarType::Snv);
+        let previous = make_variant_features(&previous_variant);
+        let current = variant("chr1", 150, VarType::Snv);
+
+        let distance = get_variant_distance(&current, &previous).unwrap();
+
+        assert_eq!(distance, 50);
+    }
+
+    #[test]
+    fn variant_distance_zero_when_same_position() {
+        let previous_variant = variant("chr1", 100, VarType::Snv);
+        let previous = make_variant_features(&previous_variant);
+        let current = variant("chr1", 100, VarType::Snv);
+
+        let distance = get_variant_distance(&current, &previous).unwrap();
+
+        assert_eq!(distance, 0);
+    }
+
+    #[test]
+    fn variant_distance_errors_when_unsorted() {
+        let previous_variant = variant("chr1", 200, VarType::Snv);
+        let previous = make_variant_features(&previous_variant);
+        let current = variant("chr1", 100, VarType::Snv);
+
+        let err = get_variant_distance(&current, &previous).unwrap_err();
+
+        assert!(matches!(
+            err,
+            AppError::UnsortedVariants {
+                chromosome,
+                error_pos,
+                previous_pos,
+            }
+            if chromosome == "chr1"
+                && error_pos == 100
+                && previous_pos == 200
+        ));
+    }
+
+    // Bin tests
+    #[test]
+    fn bin_empty_variants() {
+        let parsed = parsed(vec![]);
+
+        let bins = bin(&parsed, Some(10)).unwrap();
+
+        assert!(bins.bins.is_empty());
+    }
+
+    #[test]
+    fn bin_single_variant() {
+        let parsed = parsed(vec![
+            variant("chr1", 100, VarType::Snv),
+        ]);
+
+        let bins = bin(&parsed, Some(10)).unwrap();
+
+        assert_eq!(bins.bins.len(), 1);
+        assert_eq!(bins.bins[0].variants.len(), 1);
+    }
+
+    #[test]
+    fn bin_variants_within_gap() {
+        let parsed = parsed(vec![
+            variant("chr1", 100, VarType::Snv),
+            variant("chr1", 105, VarType::Snv),
+            variant("chr1", 110, VarType::Snv),
+        ]);
+
+        let bins = bin(&parsed, Some(10)).unwrap();
+
+        assert_eq!(bins.bins.len(), 1);
+        assert_eq!(bins.bins[0].variants.len(), 3);
+    }
+
+    #[test]
+    fn bin_variants_outside_gap() {
+        let parsed = parsed(vec![
+            variant("chr1", 100, VarType::Snv),
+            variant("chr1", 120, VarType::Snv),
+        ]);
+
+        let bins = bin(&parsed, Some(10)).unwrap();
+
+        assert_eq!(bins.bins.len(), 2);
+        assert_eq!(bins.bins[0].variants.len(), 1);
+        assert_eq!(bins.bins[1].variants.len(), 1);
+    }
+
+    #[test]
+    fn bin_new_chromosome_creates_new_bin() {
+        let parsed = parsed(vec![
+            variant("chr1", 100, VarType::Snv),
+            variant("chr2", 101, VarType::Snv),
+        ]);
+
+        let bins = bin(&parsed, Some(1000)).unwrap();
+
+        assert_eq!(bins.bins.len(), 2);
+
+        assert_eq!(bins.bins[0].chrom, "chr1");
+        assert_eq!(bins.bins[1].chrom, "chr2");
+    }
+
+    #[test]
+    fn bin_equal_gap_is_same_bin() {
+        let parsed = parsed(vec![
+            variant("chr1", 100, VarType::Snv),
+            variant("chr1", 110, VarType::Snv),
+        ]);
+
+        let bins = bin(&parsed, Some(10)).unwrap();
+
+        assert_eq!(bins.bins.len(), 1);
+    }
+
+    #[test]
+    fn bin_uses_default_gap() {
+        let parsed = parsed(vec![
+            variant("chr1", 100, VarType::Snv),
+            variant("chr1", 1_000_000, VarType::Snv),
+        ]);
+
+        // If no gap passed, default gap should be set to 100_000
+        let bins = bin(&parsed, None).unwrap();
+
+        assert_eq!(bins.bins.len(), 2);
+    }
+}
