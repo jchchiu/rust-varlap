@@ -49,13 +49,11 @@ pub enum AppError {
     //     header: String,
     // },
 
-    #[error("CRAM file requires a reference FASTA")]
+    #[error("missing reference FASTA required for CRAM file")]
     MissingCramReference,
 
     #[error("reference sequence not found")]
-    MissingReferenceSequence {
-        chromosome: String,
-    },
+    MissingReferenceSequence,
 }
 
 impl AppError {
@@ -155,9 +153,8 @@ pub fn print_error(program: &str, err: &AppError) {
             eprintln!("Specify one with --fasta <FASTA>.");
         }
 
-        AppError::MissingReferenceSequence { chromosome } => {
+        AppError::MissingReferenceSequence => {
             eprintln!("{program} ERROR: reference sequence not found");
-            eprintln!("Chromosome: {}", chromosome);
             eprintln!("The alignment file does not contain this reference sequence.");
             eprintln!("Check that the BAM/CRAM and variant file use the same reference genome.");
         }

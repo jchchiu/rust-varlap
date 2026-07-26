@@ -211,9 +211,7 @@ fn get_ref_len(
         }
     }
 
-    Err(AppError::MissingReferenceSequence {
-        chromosome: chrom.to_owned(),
-    }.into())
+    Err(AppError::MissingReferenceSequence.into())
 }
 
 fn skip_read_check(read: &Rc<Record>) -> bool {
