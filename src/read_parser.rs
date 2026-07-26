@@ -12,7 +12,7 @@ use crate::errors::AppError;
 use crate::output::{write_variant_row, write_header};
 use crate::variant::{BinnedVariants, VarClass, Variant, VariantBin};
 
-pub fn parse_region(
+pub fn parse(
     binned_variants: &mut BinnedVariants,
     reads_path: &Path,
     csv_path: &Path,
@@ -23,27 +23,11 @@ pub fn parse_region(
     // ADD vector of [chrom/first variant index/length] here
 ) -> Result<()> {
     let mut reader = open_indexed_reader(reads_path, fasta_path)?;
-
-    // let file_type = detect_file_type(reads_path)?;
     
     let mut csv_writer = WriterBuilder::new()
         .has_headers(false)
         .from_path(csv_path)
         .with_context(|| format!("Failed to create output CSV '{}'", csv_path.display()))?;
-
-    // let mut reader = IndexedReader::from_path(reads_path)
-    //     .with_context(|| format!("Failed to open reads file '{}'", reads_path.display()))?;
-
-    // match file_type {
-    //     FileType::Bam => {}
-    //     FileType::Cram => {
-    //         let fasta = fasta_path.ok_or(AppError::MissingCramReference)?;
-
-    //         reader
-    //             .set_reference(fasta)
-    //             .with_context(|| format!("Failed to set CRAM reference to '{}'", fasta.display()))?;
-    //     },
-    // };
 
     // Write dynamic header based on BAM/CRAM filename
     write_header(&mut csv_writer, reads_path, label, varclass)
@@ -53,67 +37,6 @@ pub fn parse_region(
 
         process_bin(bin, &mut reader, &mut csv_writer, sample)?;
 
-        // let chrom_info = get_chrom_info(&bin.variants);
-
-        // reader.fetch((&bin.chrom, chrom_info.min_pos - 1, chrom_info.max_pos))
-        //     .with_context(|| 
-        //         format!(
-        //             "Failed to fetch region {}:{}-{}",
-        //                 bin.chrom,
-        //                 chrom_info.min_pos,
-        //                 chrom_info.max_pos,    
-        //         )
-        //     )?;
-
-        // debug!(
-        //     "Processing bin from chromosome: {} \n
-        //      Spanning position {} - {} \n
-        //      Number of variants being processed {}",
-        //     bin.chrom,
-        //     chrom_info.min_pos,
-        //     chrom_info.max_pos,
-        //     bin.variants.len(),
-        // );
-
-        // let ref_seq_len = get_ref_len(&reader, &bin.chrom)?;
-
-        // for read_result in reader.rc_records() {
-        //     let record = read_result
-        //         .context("Failed getting read from reads file")?;
-            
-        //     if skip_read_check(&record) {
-        //         continue;
-        //     }
-
-        //     let read_start = record.pos() as u64;
-
-        //     while let Some(var) = bin.variants.front() {
-        //         if (read_start + 1) > var.info.pos {
-        //                 let pos_normalized: f64 = var.get_pos_normalized(ref_seq_len);
-        //                 write_variant_row(&mut csv_writer, var, pos_normalized, sample)?;
-        //                 bin.variants.pop_front();
-
-        //         } else {
-        //             break;
-        //         }
-        //     }
-
-        //     for var in &mut bin.variants {
-        //         let zero_based_pos = var.info.pos - 1;
-        //         let read_end = record.cigar().end_pos() as u64;
-
-        //         if zero_based_pos >= read_start && zero_based_pos < read_end {
-        //             var.count_locus_features(&record, zero_based_pos);
-        //         } else {
-        //             break;
-        //         }
-        //     }
-        // }
-
-        // while let Some(var) = bin.variants.pop_front() {
-        //     let pos_normalized = var.get_pos_normalized(ref_seq_len);
-        //     write_variant_row(&mut csv_writer, &var, pos_normalized, sample)?;
-        // }
         csv_writer
             .flush()
             .context("Failed to flush output CSV to disk")?;
@@ -192,6 +115,7 @@ fn process_bin(
         let read_end = record.cigar().end_pos() as u64;
 
         while let Some(var) = bin.variants.front() {
+            // Pop and write the variant features if the start of the read is > than the variant position
             if (read_start + 1) > var.info.pos {
                 let pos_normalized = var.get_pos_normalized(ref_seq_len);
                 write_variant_row(csv_writer, var, pos_normalized, sample)?;
@@ -212,6 +136,7 @@ fn process_bin(
         }
     }
 
+    // Pop and write any remaining variants
     while let Some(var) = bin.variants.pop_front() {
         let pos_normalized = var.get_pos_normalized(ref_seq_len);
         write_variant_row(csv_writer, &var, pos_normalized, sample)?;

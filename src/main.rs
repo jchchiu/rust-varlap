@@ -23,7 +23,7 @@ fn run() -> Result<()> {
             // ,&args.reads, args.fasta.as_deref()
         )?;
 
-    read_parser::parse_region(
+    read_parser::parse(
         &mut binned_variants, 
         &args.reads, 
         &args.output, 
