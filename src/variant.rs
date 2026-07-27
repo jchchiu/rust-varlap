@@ -1,9 +1,11 @@
 use std::collections::VecDeque;
 
 use clap::ValueEnum;
-use rust_htslib::bam::{Record};
+use rust_htslib::bam::Record;
 
-use crate::features::{LocusFeatures, NormalizedLocusFeaturesRow, AlleleCountsSnvStats, AlleleCountsIndelStats};
+use crate::features::{
+    AlleleCountsIndelStats, AlleleCountsSnvStats, LocusFeatures, NormalizedLocusFeaturesRow,
+};
 
 #[derive(Debug, Clone)]
 pub struct VariantInfo {
@@ -14,7 +16,7 @@ pub struct VariantInfo {
     pub vartype: VarType,
 }
 
-// NOTE: 
+// NOTE:
 // If we want to process multiple BAMs, we should move the features out
 //  of the variant struct (maybe VariantInfo and VariantFeat structs)
 //  where VariantFeat has an immutable lifetime borrow of VariantInfo
@@ -24,7 +26,7 @@ pub struct Variant<'a> {
     pub features: LocusFeatures,
 }
 
-impl <'a> Variant<'a> {
+impl<'a> Variant<'a> {
     pub fn base_counts_stats(&self) -> Option<AlleleCountsSnvStats> {
         let ref_char = self.info.refr.chars().next()?;
         let alt_char = self.info.alt.chars().next()?;
@@ -80,7 +82,7 @@ impl <'a> Variant<'a> {
     }
 }
 
-// User supplied 
+// User supplied
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum VarClass {
     Snv,
@@ -102,7 +104,7 @@ impl VarType {
             VarType::Snv => "SNV",
             VarType::Del => "DEL",
             VarType::Ins => "INS",
-            VarType::Unknown => "UNKNOWN",            
+            VarType::Unknown => "UNKNOWN",
         }
     }
 }
@@ -114,7 +116,7 @@ pub struct VariantBin<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct ParsedVariants  {
+pub struct ParsedVariants {
     pub variants: Vec<VariantInfo>,
 }
 

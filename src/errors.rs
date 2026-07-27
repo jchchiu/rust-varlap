@@ -5,57 +5,45 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("unsupported variants file format")]
-    UnsupportedVariantsFormat  {
+    UnsupportedVariantsFormat {
         filename: PathBuf,
         extension: String,
     },
 
     #[error("unsupported reads file format")]
-    UnsupportedReadsFormat  {
+    UnsupportedReadsFormat {
         filename: PathBuf,
         extension: String,
     },
 
     #[error("variants file is not sorted")]
-    UnsortedVariants  {
+    UnsortedVariants {
         chromosome: String,
         error_pos: u64,
         previous_pos: u64,
     },
 
     #[error("missing variants file extension")]
-    MissingVariantsExtension {
-        filename: PathBuf,
-    },
+    MissingVariantsExtension { filename: PathBuf },
 
     #[error("missing reads file extension")]
-    MissingReadsExtension {
-        filename: PathBuf,
-    },
+    MissingReadsExtension { filename: PathBuf },
 
     #[error("invalid gzipped filename")]
-    InvalidGzipName {
-        filename: PathBuf,
-    },
+    InvalidGzipName { filename: PathBuf },
 
     #[error("missing required CSV/TSV Header")]
-    MissingDelimitedHeader {
-        fields: String,
-        headers: String,
-    },
+    MissingDelimitedHeader { fields: String, headers: String },
 
     // #[error("invalid VCF Header")]
     // InvalidVcfHeader {
     //     header: String,
     // },
-
-    #[error("CRAM file requires a reference FASTA")]
+    #[error("missing reference FASTA required for CRAM file")]
     MissingCramReference,
 
     #[error("reference sequence not found")]
-    MissingReferenceSequence {
-        chromosome: String,
-    },
+    MissingReferenceSequence { chromosome: String },
 }
 
 impl AppError {
@@ -65,9 +53,9 @@ impl AppError {
     //  3: File format error
     pub fn exit_code(&self) -> i32 {
         match self {
-            AppError::UnsupportedVariantsFormat  { .. } => 3,
-            AppError::UnsupportedReadsFormat  { .. } => 3,
-            AppError::UnsortedVariants { ..} => 3,
+            AppError::UnsupportedVariantsFormat { .. } => 3,
+            AppError::UnsupportedReadsFormat { .. } => 3,
+            AppError::UnsortedVariants { .. } => 3,
             AppError::MissingVariantsExtension { .. } => 3,
             AppError::MissingReadsExtension { .. } => 3,
             AppError::InvalidGzipName { .. } => 3,
@@ -80,7 +68,7 @@ impl AppError {
 
 pub fn print_error(program: &str, err: &AppError) {
     match err {
-        AppError::UnsupportedVariantsFormat  {
+        AppError::UnsupportedVariantsFormat {
             filename,
             extension,
         } => {
@@ -94,7 +82,7 @@ pub fn print_error(program: &str, err: &AppError) {
             eprintln!("  .tsv");
         }
 
-        AppError::UnsupportedReadsFormat  {
+        AppError::UnsupportedReadsFormat {
             filename,
             extension,
         } => {
@@ -109,11 +97,14 @@ pub fn print_error(program: &str, err: &AppError) {
         AppError::UnsortedVariants {
             chromosome,
             error_pos,
-            previous_pos
+            previous_pos,
         } => {
             eprintln!("{program} ERROR: variants are not sorted");
             eprintln!("At chromosome: {}", chromosome);
-            eprintln!("Variant at position {} comes before {}", error_pos, previous_pos);
+            eprintln!(
+                "Variant at position {} comes before {}",
+                error_pos, previous_pos
+            );
             eprintln!("Please sort positions in ascending order before running again");
         }
 
@@ -151,7 +142,9 @@ pub fn print_error(program: &str, err: &AppError) {
 
         AppError::MissingCramReference => {
             eprintln!("{program} ERROR: missing reference FASTA");
-            eprintln!("CRAM files require the exact reference FASTA that was used for it's creation.");
+            eprintln!(
+                "CRAM files require the exact reference FASTA that was used for it's creation."
+            );
             eprintln!("Specify one with --fasta <FASTA>.");
         }
 

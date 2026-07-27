@@ -37,3 +37,6 @@ rust-varlap is a rewrite of [varlap](https://github.com/bjpop/varlap) from pytho
 - Deal with paired reads (implement something similar to mosdepth?)
 - Add option to sort variants if unsorted
 - Make ref/alt input optional (Still output stats that do not need this info)
+- Add function to deal with CRAM files that have standardized fasta reference files that can be accessed by bamreader
+- Implement automatic outlier detection like original varlap?
+    - If outlier detected can also output a command for IGV viewer that automatically opens the variant position of interest?

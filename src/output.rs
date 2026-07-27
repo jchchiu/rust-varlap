@@ -6,7 +6,7 @@ use csv::Writer;
 use serde::Serialize;
 
 use crate::features::{LocusFeatures, NormalizedLocusFeaturesRow};
-use crate::variant::{Variant, VarClass};
+use crate::variant::{VarClass, Variant};
 
 pub fn write_header(
     writer: &mut Writer<File>,
@@ -16,13 +16,11 @@ pub fn write_header(
 ) -> Result<()> {
     let label_prefix = match label {
         Some(label) => label,
-        None => {
-            reads_path
-                .file_name()
-                .context("Invalid or missing file name")?
-                .to_str()
-                .context("File name contains invalid UTF-8")?
-        },
+        None => reads_path
+            .file_name()
+            .context("Invalid or missing file name")?
+            .to_str()
+            .context("File name contains invalid UTF-8")?,
     };
 
     let dynamic_headers = match varclass {
@@ -35,13 +33,14 @@ pub fn write_header(
         .map(|field| format!("{label_prefix} {field}"))
         .collect();
 
-    writer.write_record(
-        HEADER_FIELDS_SHARED
-            .iter()
-            .copied()
-            .chain(labelled_dynamic.iter().map(String::as_str)),
-    )
-    .context("Failed to write CSV header")?;
+    writer
+        .write_record(
+            HEADER_FIELDS_SHARED
+                .iter()
+                .copied()
+                .chain(labelled_dynamic.iter().map(String::as_str)),
+        )
+        .context("Failed to write CSV header")?;
 
     Ok(())
 }
@@ -52,13 +51,14 @@ pub fn write_variant_row(
     pos_normalized: f64,
     sample: Option<&str>,
 ) -> Result<()> {
-    writer.serialize(OutputRow::from_variant(var, pos_normalized, sample))
-        .with_context(||
+    writer
+        .serialize(OutputRow::from_variant(var, pos_normalized, sample))
+        .with_context(|| {
             format!(
                 "Failed to write variant '{}:{}' to output CSV",
                 var.info.chrom, var.info.pos
             )
-        )?;
+        })?;
 
     Ok(())
 }
@@ -147,8 +147,12 @@ enum OutputRow<'a> {
 impl<'a> OutputRow<'a> {
     fn from_variant(var: &'a Variant, pos_normalized: f64, sample: Option<&'a str>) -> Self {
         match &var.features {
-            LocusFeatures::Snv(_) => OutputRow::Snv(OutputRowSNV::from_variant(var, pos_normalized, sample)),
-            LocusFeatures::Indel(_) => OutputRow::Indel(OutputRowINDEL::from_variant(var, pos_normalized, sample)),
+            LocusFeatures::Snv(_) => {
+                OutputRow::Snv(OutputRowSNV::from_variant(var, pos_normalized, sample))
+            }
+            LocusFeatures::Indel(_) => {
+                OutputRow::Indel(OutputRowINDEL::from_variant(var, pos_normalized, sample))
+            }
         }
     }
 }
@@ -173,13 +177,15 @@ struct OutputRowSNV<'a> {
     ref_count: u32,
     alt_count: u32,
     alt_vaf: f64,
-    
+
     read_features: OutputReadFeatures,
 }
 
 impl<'a> OutputRowSNV<'a> {
     fn from_variant(var: &'a Variant, pos_normalized: f64, sample: Option<&'a str>) -> Self {
-        let bcs = var.base_counts_stats().expect("Could not get base count statistics.");
+        let bcs = var
+            .base_counts_stats()
+            .expect("Could not get base count statistics.");
         let read_features = OutputReadFeatures::from(var.normalized_row());
 
         let f = match &var.features {
@@ -196,7 +202,7 @@ impl<'a> OutputRowSNV<'a> {
             pos_normalized,
             sample,
             depth: bcs.depth,
-            
+
             count_a: f.base_counts.a,
             count_t: f.base_counts.t,
             count_g: f.base_counts.g,
@@ -236,7 +242,9 @@ impl<'a> OutputRowINDEL<'a> {
     fn from_variant(var: &'a Variant, pos_normalized: f64, sample: Option<&'a str>) -> Self {
         let read_features = OutputReadFeatures::from(var.normalized_row());
 
-        let stats = var.indel_stats().expect("Could not get indel count statistics.");
+        let stats = var
+            .indel_stats()
+            .expect("Could not get indel count statistics.");
 
         Self {
             chrom: &var.info.chrom,

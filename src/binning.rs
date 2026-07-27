@@ -5,12 +5,12 @@ use std::collections::VecDeque;
 use anyhow::Result;
 // use rust_htslib::bam::Reader;
 // use rust_htslib::bam::{Record, Read};
-use tracing::{info};
+use tracing::info;
 
 use crate::errors::AppError;
 use crate::features::{LocusFeatures, LocusFeaturesIndel, LocusFeaturesSnv};
 // use crate::read_parser::{detect_file_type, FileType};
-use crate::variant::{BinnedVariants, ParsedVariants, VarType, Variant, VariantInfo, VariantBin};
+use crate::variant::{BinnedVariants, ParsedVariants, VarType, Variant, VariantBin, VariantInfo};
 
 pub fn bin<'a>(
     parsed_variants: &'a ParsedVariants,
@@ -60,7 +60,7 @@ pub fn bin<'a>(
             DEFAULT_GAP
         }
     };
-    
+
     for variant in &parsed_variants.variants {
         let should_append = if let Some(last_bin) = bins.last() {
             if last_bin.chrom != variant.chrom {
@@ -92,18 +92,19 @@ pub fn bin<'a>(
         }
     }
 
-    info!("Number of bins created for variants successfully: {}", bins.len());
+    info!(
+        "Number of bins created for variants successfully: {}",
+        bins.len()
+    );
 
     Ok(BinnedVariants { bins })
 }
 
 const DEFAULT_GAP: u64 = 100_000;
 
-fn get_variant_distance(
-    current: &VariantInfo,
-    previous: &Variant,
-) -> Result<u64, AppError> {
-    current.pos
+fn get_variant_distance(current: &VariantInfo, previous: &Variant) -> Result<u64, AppError> {
+    current
+        .pos
         .checked_sub(previous.info.pos)
         .ok_or_else(|| AppError::UnsortedVariants {
             chromosome: current.chrom.clone(),
@@ -251,9 +252,7 @@ mod tests {
 
     #[test]
     fn bin_single_variant() {
-        let parsed = parsed(vec![
-            variant("chr1", 100, VarType::Snv),
-        ]);
+        let parsed = parsed(vec![variant("chr1", 100, VarType::Snv)]);
 
         let bins = bin(&parsed, Some(10)).unwrap();
 
