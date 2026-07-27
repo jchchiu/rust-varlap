@@ -1,7 +1,12 @@
 [package]
 name = "rust-varlap"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2024"
+description = "Quality control tool for genetic variants"
+readme = "README.md"
+repository = "https://github.com/jchchiu/rust-varlap"
+license = "MIT"
+license-file = "LICENSE"
 
 [dependencies]
 anyhow = "1.0.102"
