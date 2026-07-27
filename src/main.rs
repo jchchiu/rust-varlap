@@ -15,22 +15,21 @@ use crate::errors::{AppError, print_error};
 fn run() -> Result<()> {
     let args = cli::parse();
 
-    let parsed_variants =
-        variant_parser::parse(&args.variants, &args.varclass)?;
+    let parsed_variants = variant_parser::parse(&args.variants, &args.varclass)?;
 
-    let mut binned_variants =
-        binning::bin(&parsed_variants, args.gap
-            // ,&args.reads, args.fasta.as_deref()
-        )?;
+    let mut binned_variants = binning::bin(
+        &parsed_variants,
+        args.gap, // ,&args.reads, args.fasta.as_deref()
+    )?;
 
     read_parser::parse(
-        &mut binned_variants, 
-        &args.reads, 
-        &args.output, 
+        &mut binned_variants,
+        &args.reads,
+        &args.output,
         args.sample.as_deref(),
-        args.label.as_deref(), 
-        &args.varclass, 
-        args.fasta.as_deref()
+        args.label.as_deref(),
+        &args.varclass,
+        args.fasta.as_deref(),
     )?;
 
     Ok(())
@@ -44,7 +43,6 @@ fn main() {
     info!("{} has started", program);
 
     if let Err(err) = run() {
-
         if let Some(app_err) = err.downcast_ref::<AppError>() {
             print_error(program, app_err);
             std::process::exit(app_err.exit_code());

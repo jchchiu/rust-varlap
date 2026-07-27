@@ -68,7 +68,7 @@ impl CommonLocusFeatures {
             all_supplementary: all.supplementary,
             all_normalized_read_position: all.normalized_read_position,
         }
-    }    
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -78,21 +78,11 @@ pub struct LocusFeaturesSnv {
 }
 
 impl LocusFeaturesSnv {
-    pub fn count(
-        &mut self,
-        read: &Record,
-        refr: char,
-        alt: char,
-        query_pos: Option<u32>,
-    ) {
+    pub fn count(&mut self, read: &Record, refr: char, alt: char, query_pos: Option<u32>) {
         let seq = read.seq();
         let base: Option<u8> = query_pos.and_then(|pos| {
             let i = pos as usize;
-            if i < seq.len() {
-                Some(seq[i])
-            } else {
-                None
-            }
+            if i < seq.len() { Some(seq[i]) } else { None }
         });
 
         if let Some(base_u8) = base {
@@ -154,41 +144,47 @@ impl LocusFeaturesIndel {
         });
 
         let mut read_supports_ref = false;
-        if overlapping_indels.is_empty() && let Some(qpos) = query_pos {
+        if overlapping_indels.is_empty()
+            && let Some(qpos) = query_pos
+        {
             let seq_bytes = read.seq().as_bytes();
             let read_bases = match indel_type {
-                VarType::Ins => {
-                    Some((seq_bytes[qpos as usize] as char)
-                    .to_string()
-                    .to_ascii_uppercase())
-                },
+                VarType::Ins => Some(
+                    (seq_bytes[qpos as usize] as char)
+                        .to_string()
+                        .to_ascii_uppercase(),
+                ),
                 VarType::Del => {
-                    // TEMP FIX: In python if string slice is out of bounds then it 
+                    // TEMP FIX: In python if string slice is out of bounds then it
                     // truncates end value to length of vector
                     // NOTE: MAY NEED TO REWRITE THIS PART
                     if (qpos + (size as u32) + 1) as usize > seq_bytes.len() {
-                        Some(String::from_utf8(
-                            seq_bytes[qpos as usize .. seq_bytes.len()].to_vec()
+                        Some(
+                            String::from_utf8(seq_bytes[qpos as usize..seq_bytes.len()].to_vec())
+                                .unwrap()
+                                .to_ascii_uppercase(),
                         )
-                        .unwrap()
-                        .to_ascii_uppercase())
                     } else {
-                        Some(String::from_utf8(
-                            seq_bytes[qpos as usize .. (qpos + (size as u32) + 1) as usize].to_vec()
+                        Some(
+                            String::from_utf8(
+                                seq_bytes[qpos as usize..(qpos + (size as u32) + 1) as usize]
+                                    .to_vec(),
+                            )
+                            .unwrap()
+                            .to_ascii_uppercase(),
                         )
-                        .unwrap()
-                        .to_ascii_uppercase())
                     }
                     //
-                },
+                }
                 _ => None,
             };
-            
+
             // FIX UNWRAP HERE
             if let Some(read_bases) = read_bases
-                && refr == read_bases {
-                    read_supports_ref = true;
-                }
+                && refr == read_bases
+            {
+                read_supports_ref = true;
+            }
         }
 
         if read_supports_ref {
@@ -242,7 +238,7 @@ impl LocusFeaturesIndel {
                     if self.interval_overlaps(var_start, var_end, this_start, this_end) {
                         let seq_bytes = read.seq().as_bytes();
                         let inserted_bases = String::from_utf8(
-                            seq_bytes[read_pos as usize .. (read_pos + len as u64) as usize].to_vec()
+                            seq_bytes[read_pos as usize..(read_pos + len as u64) as usize].to_vec(),
                         )
                         .unwrap()
                         .to_ascii_uppercase();
@@ -284,7 +280,7 @@ impl LocusFeaturesIndel {
                 // Consumes neither reference nor query
                 Cigar::HardClip(_) | Cigar::Pad(_) => {}
             }
-        }        
+        }
 
         result
     }
@@ -397,16 +393,12 @@ pub struct ReadFeatures {
     pub forward_strand: u32,
     pub reverse_strand: u32,
     pub supplementary: u32,
-    pub normalized_read_position: f64, 
+    pub normalized_read_position: f64,
     pub num_reads: u32,
 }
 
 impl ReadFeatures {
-    pub fn count(
-        &mut self,
-        read: &Record,
-        query_pos: Option<u32>,
-    ) {
+    pub fn count(&mut self, read: &Record, query_pos: Option<u32>) {
         // Instead of counting num of reads, can create a function that sums foward and reverse strand?
         self.num_reads += 1;
         let query_len = read.seq_len();
@@ -441,16 +433,19 @@ impl ReadFeatures {
                 Aux::U32(v) => self.nm += v as u64,
                 Aux::I8(v) => {
                     if v > 0 {
-                        self.nm += v as u64}
-                    },
+                        self.nm += v as u64
+                    }
+                }
                 Aux::I16(v) => {
                     if v > 0 {
-                        self.nm += v as u64}
-                    },
+                        self.nm += v as u64
+                    }
+                }
                 Aux::I32(v) => {
                     if v > 0 {
-                        self.nm += v as u64}
-                    },
+                        self.nm += v as u64
+                    }
+                }
                 _ => {}
             }
         }
@@ -463,14 +458,15 @@ impl ReadFeatures {
         if read.is_supplementary() {
             self.supplementary += 1;
         }
-
     }
 
     pub fn query_alignment_length(&self, record: &Record) -> u64 {
         let mut len: u64 = 0;
         for c in record.cigar().iter() {
             match *c {
-                Cigar::Match(l) | Cigar::Equal(l) | Cigar::Diff(l) | Cigar::Ins(l) => len += l as u64,
+                Cigar::Match(l) | Cigar::Equal(l) | Cigar::Diff(l) | Cigar::Ins(l) => {
+                    len += l as u64
+                }
                 _ => {}
             }
         }

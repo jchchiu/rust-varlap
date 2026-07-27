@@ -8,7 +8,7 @@ use flate2::read::MultiGzDecoder;
 use tracing::{debug, info, warn};
 
 use crate::errors::AppError;
-use crate::variant::{VariantInfo, VarClass, VarType, ParsedVariants};
+use crate::variant::{ParsedVariants, VarClass, VarType, VariantInfo};
 
 pub fn parse(variants_path: &Path, varclass: &VarClass) -> Result<ParsedVariants> {
     let file_type = detect_file_type(variants_path)?;
@@ -25,14 +25,23 @@ pub fn parse(variants_path: &Path, varclass: &VarClass) -> Result<ParsedVariants
 
     match file_type {
         FileType::Vcf => parse_vcf(variants_path, varclass, &mut variants, &mut skipped)?,
-        FileType::Csv | FileType::Tsv => parse_delimited(variants_path, file_type, varclass, &mut variants, &mut skipped)?,
+        FileType::Csv | FileType::Tsv => parse_delimited(
+            variants_path,
+            file_type,
+            varclass,
+            &mut variants,
+            &mut skipped,
+        )?,
     };
 
     info!("Parsed variants successfully");
-    info!("Total number of variants in input: {}", skipped.total_variants(variants.len()));
+    info!(
+        "Total number of variants in input: {}",
+        skipped.total_variants(variants.len())
+    );
     info!("Number of variants parsed: {}", variants.len());
     info!("Number of variants skipped: {}", skipped.skipped);
-    
+
     Ok(ParsedVariants { variants })
 }
 
@@ -44,12 +53,11 @@ enum FileType {
 }
 
 fn detect_file_type(path: &Path) -> Result<FileType, AppError> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .ok_or_else(|| AppError::MissingVariantsExtension {
+    let ext = path.extension().and_then(|e| e.to_str()).ok_or_else(|| {
+        AppError::MissingVariantsExtension {
             filename: path.to_path_buf(),
-        })?;
+        }
+    })?;
 
     let actual_ext = if ext == "gz" {
         path.file_stem()
@@ -79,7 +87,7 @@ struct SkippedVariants {
 }
 
 impl SkippedVariants {
-    fn total_variants(&self, parsed_variants: usize) -> usize{
+    fn total_variants(&self, parsed_variants: usize) -> usize {
         self.skipped + parsed_variants
     }
 }
@@ -128,9 +136,7 @@ fn parse_vcf(
     let reader = BufReader::new(input);
 
     for (line_no, line_result) in reader.lines().enumerate() {
-        let line = line_result.with_context(|| {
-            format!("Failed reading line {}", line_no + 1)
-        })?;
+        let line = line_result.with_context(|| format!("Failed reading line {}", line_no + 1))?;
 
         // if line.starts_with("##") {
         //     is_valid_vcf_header_line(&line)?;
@@ -179,9 +185,7 @@ fn delimiter_for(file_type: FileType) -> u8 {
 
 fn get_header_index(headers: &StringRecord, fields: &[&str]) -> Result<usize, AppError> {
     for field in fields {
-        if let Some(idx) = headers
-            .iter()
-            .position(|h| h.eq_ignore_ascii_case(field)) {
+        if let Some(idx) = headers.iter().position(|h| h.eq_ignore_ascii_case(field)) {
             return Ok(idx);
         }
     }
@@ -201,7 +205,7 @@ fn parse_delimited(
 ) -> Result<()> {
     let input = open_variant_input(file_path)?;
 
-    let mut csv_reader = ReaderBuilder::new() 
+    let mut csv_reader = ReaderBuilder::new()
         .delimiter(delimiter_for(file_type))
         .has_headers(true)
         .flexible(true)
@@ -218,9 +222,8 @@ fn parse_delimited(
     let alt_idx = get_header_index(&headers, &["alt", "alts", "alternate"])?;
 
     for (record_no, record_result) in csv_reader.records().enumerate() {
-        let record = record_result.with_context(|| {
-            format!("Failed reading record {}", record_no + 2)
-        })?;
+        let record =
+            record_result.with_context(|| format!("Failed reading record {}", record_no + 2))?;
 
         let line_no = record_no + 2;
 
@@ -269,11 +272,11 @@ fn parse_delimited(
 }
 
 fn process_variant_row(
-    row: &VariantRow, 
-    varclass: &VarClass, 
+    row: &VariantRow,
+    varclass: &VarClass,
     variants: &mut Vec<VariantInfo>,
     skipped: &mut SkippedVariants,
-)-> Result<()> {
+) -> Result<()> {
     for alt in &row.alts {
         let vartype = get_var_type(&row.refr, alt);
 
@@ -294,7 +297,7 @@ fn process_variant_row(
                     vartype,
                 },
             };
-            
+
             variants.push(variant);
         } else {
             skipped.skipped += 1;
@@ -312,7 +315,10 @@ fn get_var_type(refr: &str, alt: &str) -> VarType {
     } else if refr.len() < alt.len() {
         VarType::Ins
     } else {
-        warn!("Cannot determine the type of variant with ref:{} and alt:{}", refr, alt);
+        warn!(
+            "Cannot determine the type of variant with ref:{} and alt:{}",
+            refr, alt
+        );
         VarType::Unknown
     }
 }
@@ -368,7 +374,7 @@ fn is_acceptable_variant(
             row.refr,
             alt,
         );
-        
+
         false
     } else if !is_desired_type(varclass, vartype) {
         debug!(
@@ -396,7 +402,7 @@ fn is_acceptable_variant(
             vartype,
             row.refr,
         );
-        
+
         false
     } else {
         true
@@ -445,7 +451,6 @@ mod tests {
             ("A", true),
             ("a", true),
             ("AaTtGgCc", true),
-
             // Invalid bases
             ("N", false),
             ("?", false),
@@ -466,9 +471,9 @@ mod tests {
     #[test]
     fn is_desired_type_cases() {
         let cases = [
-            (VarClass::Snv,   VarType::Snv, true),
-            (VarClass::Snv,   VarType::Ins, false),
-            (VarClass::Snv,   VarType::Del, false),
+            (VarClass::Snv, VarType::Snv, true),
+            (VarClass::Snv, VarType::Ins, false),
+            (VarClass::Snv, VarType::Del, false),
             (VarClass::Indel, VarType::Snv, false),
             (VarClass::Indel, VarType::Ins, true),
             (VarClass::Indel, VarType::Del, true),
@@ -489,23 +494,18 @@ mod tests {
             // Valid insertions
             ("A", "AT", true),
             ("AT", "ATG", true),
-
             // Valid deletions
             ("AT", "A", true),
             ("ATG", "AT", true),
-
             // Equal length
             ("A", "T", false),
             ("AT", "GC", false),
-
             // Invalid insertion
             ("A", "GA", false),
             ("AT", "GAT", false),
-
             // Invalid deletion
             ("GA", "A", false),
             ("GAT", "AT", false),
-
             // Empty alleles
             ("", "A", false),
             ("A", "", false),
