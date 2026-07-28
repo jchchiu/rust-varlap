@@ -16,10 +16,6 @@ pub struct VariantInfo {
     pub vartype: VarType,
 }
 
-// NOTE:
-// If we want to process multiple BAMs, we should move the features out
-//  of the variant struct (maybe VariantInfo and VariantFeat structs)
-//  where VariantFeat has an immutable lifetime borrow of VariantInfo
 #[derive(Debug, Clone)]
 pub struct Variant<'a> {
     pub info: &'a VariantInfo,

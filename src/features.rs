@@ -6,6 +6,10 @@ use serde::Serialize;
 
 use crate::variant::VarType;
 
+// ===================================================================
+// Shared Locus Features
+// ===================================================================
+
 #[derive(Debug, Clone)]
 pub enum LocusFeatures {
     Snv(LocusFeaturesSnv),
@@ -72,6 +76,122 @@ impl CommonLocusFeatures {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct ReadFeatures {
+    pub nm: u64,
+    pub base_qual: u64,
+    pub map_qual: u64,
+    pub align_len: u64,
+    pub clipping: u64,
+    pub indel: u64,
+    pub forward_strand: u32,
+    pub reverse_strand: u32,
+    pub supplementary: u32,
+    pub normalized_read_position: f64,
+    pub num_reads: u32,
+}
+
+impl ReadFeatures {
+    pub fn count(&mut self, read: &Record, query_pos: Option<u32>) {
+        // Instead of counting num of reads, can create a function that sums foward and reverse strand?
+        self.num_reads += 1;
+        let query_len = read.seq_len();
+
+        if let Some(qpos) = query_pos {
+            if query_len > 0 {
+                self.normalized_read_position += qpos as f64 / query_len as f64;
+            }
+
+            let qpos_usize = qpos as usize;
+            if qpos_usize < read.qual().len() {
+                let pos_qual = read.qual()[qpos_usize];
+                self.base_qual += pos_qual as u64;
+            }
+        }
+
+        self.align_len += self.query_alignment_length(read);
+        self.map_qual += read.mapq() as u64;
+
+        for c in read.cigar().iter() {
+            match *c {
+                Cigar::Ins(len) | Cigar::Del(len) => self.indel += len as u64,
+                Cigar::SoftClip(len) | Cigar::HardClip(len) => self.clipping += len as u64,
+                _ => {}
+            }
+        }
+
+        if let Ok(aux) = read.aux(b"NM") {
+            match aux {
+                Aux::U8(v) => self.nm += v as u64,
+                Aux::U16(v) => self.nm += v as u64,
+                Aux::U32(v) => self.nm += v as u64,
+                Aux::I8(v) => {
+                    if v > 0 {
+                        self.nm += v as u64
+                    }
+                }
+                Aux::I16(v) => {
+                    if v > 0 {
+                        self.nm += v as u64
+                    }
+                }
+                Aux::I32(v) => {
+                    if v > 0 {
+                        self.nm += v as u64
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if read.is_reverse() {
+            self.reverse_strand += 1;
+        } else {
+            self.forward_strand += 1;
+        }
+        if read.is_supplementary() {
+            self.supplementary += 1;
+        }
+    }
+
+    pub fn query_alignment_length(&self, record: &Record) -> u64 {
+        let mut len: u64 = 0;
+        for c in record.cigar().iter() {
+            match *c {
+                Cigar::Match(l) | Cigar::Equal(l) | Cigar::Diff(l) | Cigar::Ins(l) => {
+                    len += l as u64
+                }
+                _ => {}
+            }
+        }
+        len
+    }
+
+    pub fn normalized(&self) -> NormalizedReadFeatures {
+        if self.num_reads > 0 {
+            let n = self.num_reads as f64;
+            NormalizedReadFeatures {
+                nm: Some(self.nm as f64 / n),
+                base_qual: Some(self.base_qual as f64 / n),
+                map_qual: Some(self.map_qual as f64 / n),
+                align_len: Some(self.align_len as f64 / n),
+                clipping: Some(self.clipping as f64 / n),
+                indel: Some(self.indel as f64 / n),
+                forward_strand: Some(self.forward_strand as f64 / n),
+                reverse_strand: Some(self.reverse_strand as f64 / n),
+                supplementary: Some(self.supplementary as f64 / n),
+                normalized_read_position: Some(self.normalized_read_position / n),
+            }
+        } else {
+            NormalizedReadFeatures::default()
+        }
+    }
+}
+
+// ===================================================================
+// Locus Features for SNV
+// ===================================================================
+
+#[derive(Debug, Clone, Default)]
 pub struct LocusFeaturesSnv {
     pub base_counts: AlleleCountsSnv,
     pub common: CommonLocusFeatures,
@@ -100,6 +220,73 @@ impl LocusFeaturesSnv {
         self.common.all_read_features.count(read, query_pos);
     }
 }
+
+#[derive(Debug, Clone, Default)]
+pub struct AlleleCountsSnv {
+    pub a: u32,
+    pub c: u32,
+    pub g: u32,
+    pub t: u32,
+    pub n: u32,
+}
+
+impl AlleleCountsSnv {
+    pub fn count(&mut self, base: char) {
+        match base {
+            'A' => self.a += 1,
+            'C' => self.c += 1,
+            'G' => self.g += 1,
+            'T' => self.t += 1,
+            'N' => self.n += 1,
+            _ => eprintln!("Warning: Base does not match: {}", base),
+        }
+    }
+
+    pub fn count_for_base(&self, base: char) -> u32 {
+        match base {
+            'A' => self.a,
+            'C' => self.c,
+            'G' => self.g,
+            'T' => self.t,
+            'N' => self.n,
+            _ => 0,
+        }
+    }
+
+    fn depth(&self) -> u32 {
+        self.a + self.c + self.g + self.t + self.n
+    }
+
+    pub fn stats(&self, refr: char, alt: char) -> AlleleCountsSnvStats {
+        let depth = self.depth();
+        let ref_count = self.count_for_base(refr);
+        let alt_count = self.count_for_base(alt);
+        let alt_vaf = if depth > 0 {
+            alt_count as f64 / depth as f64
+        } else {
+            0.0
+        };
+
+        AlleleCountsSnvStats {
+            depth,
+            ref_count,
+            alt_count,
+            alt_vaf,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct AlleleCountsSnvStats {
+    pub depth: u32,
+    pub ref_count: u32,
+    pub alt_count: u32,
+    pub alt_vaf: f64,
+}
+
+// ===================================================================
+// Locus Features for INDEL
+// ===================================================================
 
 #[derive(Debug, Clone)]
 pub struct IndelEvent {
@@ -319,180 +506,9 @@ pub struct AlleleCountsIndelStats {
     pub overlapping_indels_count: u64,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct AlleleCountsSnv {
-    pub a: u32,
-    pub c: u32,
-    pub g: u32,
-    pub t: u32,
-    pub n: u32,
-}
-
-impl AlleleCountsSnv {
-    pub fn count(&mut self, base: char) {
-        match base {
-            'A' => self.a += 1,
-            'C' => self.c += 1,
-            'G' => self.g += 1,
-            'T' => self.t += 1,
-            'N' => self.n += 1,
-            _ => eprintln!("Warning: Base does not match: {}", base),
-        }
-    }
-
-    pub fn count_for_base(&self, base: char) -> u32 {
-        match base {
-            'A' => self.a,
-            'C' => self.c,
-            'G' => self.g,
-            'T' => self.t,
-            'N' => self.n,
-            _ => 0,
-        }
-    }
-
-    fn depth(&self) -> u32 {
-        self.a + self.c + self.g + self.t + self.n
-    }
-
-    pub fn stats(&self, refr: char, alt: char) -> AlleleCountsSnvStats {
-        let depth = self.depth();
-        let ref_count = self.count_for_base(refr);
-        let alt_count = self.count_for_base(alt);
-        let alt_vaf = if depth > 0 {
-            alt_count as f64 / depth as f64
-        } else {
-            0.0
-        };
-
-        AlleleCountsSnvStats {
-            depth,
-            ref_count,
-            alt_count,
-            alt_vaf,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct AlleleCountsSnvStats {
-    pub depth: u32,
-    pub ref_count: u32,
-    pub alt_count: u32,
-    pub alt_vaf: f64,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ReadFeatures {
-    pub nm: u64,
-    pub base_qual: u64,
-    pub map_qual: u64,
-    pub align_len: u64,
-    pub clipping: u64,
-    pub indel: u64,
-    pub forward_strand: u32,
-    pub reverse_strand: u32,
-    pub supplementary: u32,
-    pub normalized_read_position: f64,
-    pub num_reads: u32,
-}
-
-impl ReadFeatures {
-    pub fn count(&mut self, read: &Record, query_pos: Option<u32>) {
-        // Instead of counting num of reads, can create a function that sums foward and reverse strand?
-        self.num_reads += 1;
-        let query_len = read.seq_len();
-
-        if let Some(qpos) = query_pos {
-            if query_len > 0 {
-                self.normalized_read_position += qpos as f64 / query_len as f64;
-            }
-
-            let qpos_usize = qpos as usize;
-            if qpos_usize < read.qual().len() {
-                let pos_qual = read.qual()[qpos_usize];
-                self.base_qual += pos_qual as u64;
-            }
-        }
-
-        self.align_len += self.query_alignment_length(read);
-        self.map_qual += read.mapq() as u64;
-
-        for c in read.cigar().iter() {
-            match *c {
-                Cigar::Ins(len) | Cigar::Del(len) => self.indel += len as u64,
-                Cigar::SoftClip(len) | Cigar::HardClip(len) => self.clipping += len as u64,
-                _ => {}
-            }
-        }
-
-        if let Ok(aux) = read.aux(b"NM") {
-            match aux {
-                Aux::U8(v) => self.nm += v as u64,
-                Aux::U16(v) => self.nm += v as u64,
-                Aux::U32(v) => self.nm += v as u64,
-                Aux::I8(v) => {
-                    if v > 0 {
-                        self.nm += v as u64
-                    }
-                }
-                Aux::I16(v) => {
-                    if v > 0 {
-                        self.nm += v as u64
-                    }
-                }
-                Aux::I32(v) => {
-                    if v > 0 {
-                        self.nm += v as u64
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if read.is_reverse() {
-            self.reverse_strand += 1;
-        } else {
-            self.forward_strand += 1;
-        }
-        if read.is_supplementary() {
-            self.supplementary += 1;
-        }
-    }
-
-    pub fn query_alignment_length(&self, record: &Record) -> u64 {
-        let mut len: u64 = 0;
-        for c in record.cigar().iter() {
-            match *c {
-                Cigar::Match(l) | Cigar::Equal(l) | Cigar::Diff(l) | Cigar::Ins(l) => {
-                    len += l as u64
-                }
-                _ => {}
-            }
-        }
-        len
-    }
-
-    pub fn normalized(&self) -> NormalizedReadFeatures {
-        if self.num_reads > 0 {
-            let n = self.num_reads as f64;
-            NormalizedReadFeatures {
-                nm: Some(self.nm as f64 / n),
-                base_qual: Some(self.base_qual as f64 / n),
-                map_qual: Some(self.map_qual as f64 / n),
-                align_len: Some(self.align_len as f64 / n),
-                clipping: Some(self.clipping as f64 / n),
-                indel: Some(self.indel as f64 / n),
-                forward_strand: Some(self.forward_strand as f64 / n),
-                reverse_strand: Some(self.reverse_strand as f64 / n),
-                supplementary: Some(self.supplementary as f64 / n),
-                normalized_read_position: Some(self.normalized_read_position / n),
-            }
-        } else {
-            NormalizedReadFeatures::default()
-        }
-    }
-}
+// ===================================================================
+// Structs for generating normalized feature rows
+// ===================================================================
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct NormalizedLocusFeaturesRow {
