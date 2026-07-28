@@ -108,3 +108,23 @@ There was some difference when comparing the CRAM rust version to the BAM python
 `samtools index -c HG00096.mapped.ILLUMINA.bwa.GBR.exome.20120522.lossless.bam.cram`
 
 Running the rust varlap version again results in the same output as the python version; therefore, most likely reason for discrepancy is that the CRAM files are lossy; also the errors when decoding slice though I am not as sure what the finer details are re: this error.
+
+
+## NA18623
+
+https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/data/NA18623/alignment/
+
+https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/data/NA18623/alignment/NA18623.chrom20.ILLUMINA.bwa.CHB.low_coverage.20130415.bam
+
+https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/data/NA18623/alignment/NA18623.chrom20.ILLUMINA.bwa.CHB.low_coverage.20130415.bam.bai
+
+`bcftools mpileup --max-depth 100000 --no-BAQ -f ~/genomic-data/HG00096_exome/hs37d5.fa NA18623.chrom20.ILLUMINA.bwa.CHB.low_coverage.20130415.bam | bcftools call -mv -Ov -o NA18623.chrom20.vcf`
+`tabix -p vcf NA18623.chrom20.vcf`
+
+### RUNNING varlap
+RUST COMMAND:
+  `cargo build -r`
+  `time ./target/release/rust-varlap -v ~/genomic-data/NA18623/NA18623.chrom20.sorted.vcf -r ~/genomic-data/NA18623/NA18623.chrom20.ILLUMINA.bwa.CHB.low_coverage.20130415.bam --varclass snv -o ~/genomic-data/NA18623/NA18623-chr20-rust-snv.csv`
+PYTHON COMMAND
+  `source varlap_dev/bin/activate`
+  `time varlap --varclass SNV --format VCF -- ~/genomic-data/NA18623/NA18623.chrom20.ILLUMINA.bwa.CHB.low_coverage.20130415.bam < ~/genomic-data/NA18623/NA18623.chrom20.sorted.vcf > ~/genomic-data/NA18623/NA18623-chr20-python-snv.varlap.csv`
