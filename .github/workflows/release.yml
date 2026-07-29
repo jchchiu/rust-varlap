@@ -1,0 +1,191 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_override:
+        description: "Fake tag name for testing (e.g. v0.1.0-alpha.2)"
+        required: true
+        default: "v0.0.0-test"
+
+env:
+  TOOL_NAME: rust-varlap   # change to your binary name
+
+jobs:
+  # ====================================================================== #
+  # JOB 1: Compile the Rust binary on a bare Ubuntu runner
+  # ====================================================================== #
+  build-binary:
+    name: Build Rust binary
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Cache Cargo registry + compiled deps — speeds up every run after the first
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # rust-htslib needs these system libraries at compile time
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            pkg-config \
+            zlib1g-dev \
+            libbz2-dev \
+            liblzma-dev \
+            libcurl4-openssl-dev \
+            libssl-dev \
+            libdeflate-dev
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release
+
+      # Upload the binary so job 2 can pick it up without recompiling
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.TOOL_NAME }}-binary
+          path: target/release/${{ env.TOOL_NAME }}
+          retention-days: 1
+
+  # ====================================================================== #
+  # JOB 2: Package the pre-built binary into a .sif
+  # ====================================================================== #
+  build-sif:
+    name: Build Singularity image
+    runs-on: ubuntu-latest
+    needs: build-binary
+
+    steps:
+      - name: Download pre-built binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.TOOL_NAME }}-binary
+          path: artifact/
+
+      - name: Make binary executable
+        run: chmod +x artifact/${{ env.TOOL_NAME }}
+
+      - name: Install Apptainer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            wget ca-certificates fuse2fs fuse-overlayfs squashfs-tools uidmap
+          APPTAINER_VER="1.4.1"
+          wget -q "https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VER}/apptainer_${APPTAINER_VER}_amd64.deb"
+          sudo dpkg -i "apptainer_${APPTAINER_VER}_amd64.deb"
+          apptainer --version
+
+      # The .def file copies the binary in rather than compiling it,
+      # so the final image needs only the runtime libraries, not a Rust toolchain.
+      - name: Write Singularity definition file
+        env:
+          TAG: ${{ github.event.inputs.tag_override || github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          cat > container.def <<EOF
+          Bootstrap: docker
+          From: ubuntu:22.04
+
+          %labels
+              org.opencontainers.image.source  https://github.com/${REPO}
+              org.opencontainers.image.version ${TAG}
+              org.opencontainers.image.title   ${TOOL_NAME}
+
+          %files
+              artifact/${TOOL_NAME} /opt/${TOOL_NAME}/bin/${TOOL_NAME}
+
+          %environment
+              export PATH=/opt/${TOOL_NAME}/bin:\$PATH
+              export LC_ALL=C
+
+          %post
+              # Runtime libraries that rust-htslib links against
+              apt-get update && apt-get install -y --no-install-recommends \
+                  libcurl4 \
+                  zlib1g \
+                  libbz2-1.0 \
+                  liblzma5 \
+                  libdeflate0 \
+              && rm -rf /var/lib/apt/lists/*
+              chmod +x /opt/${TOOL_NAME}/bin/${TOOL_NAME}
+
+          %runscript
+              exec /opt/${TOOL_NAME}/bin/${TOOL_NAME} "\$@"
+
+          %test
+              /opt/${TOOL_NAME}/bin/${TOOL_NAME} --version
+          EOF
+
+      - name: Build .sif image
+        env:
+          TAG: ${{ github.event.inputs.tag_override || github.ref_name }}
+        run: |
+          SIF_NAME="${TOOL_NAME}_${TAG}.sif"
+          echo "SIF_NAME=${SIF_NAME}" >> "$GITHUB_ENV"
+          apptainer build --fakeroot "${SIF_NAME}" container.def
+
+      - name: Upload SIF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.TOOL_NAME }}-sif
+          path: ${{ env.SIF_NAME }}
+          retention-days: 1
+
+  # ====================================================================== #
+  # JOB 3: Create the GitHub release and attach both files
+  # ====================================================================== #
+  release:
+    name: Publish GitHub release
+    runs-on: ubuntu-latest
+    needs: [build-binary, build-sif]
+    # skip release on manual runs
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.TOOL_NAME }}-binary
+          path: artifacts/
+
+      - name: Download SIF
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.TOOL_NAME }}-sif
+          path: artifacts/
+
+      - name: Rename binary to include tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          mv artifacts/${{ env.TOOL_NAME }} \
+             artifacts/${{ env.TOOL_NAME }}_${TAG}_linux-x86_64
+
+      - name: Create release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
+          generate_release_notes: true
+          files: artifacts/*
