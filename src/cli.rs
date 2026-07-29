@@ -9,35 +9,35 @@ use crate::variant::VarClass;
 #[command(version = "0.1.0-alpha.1")]
 #[command(about = "Quality control tool for genetic variants")]
 pub struct Cli {
-    /// Filepath of variants (Supported: vcf, vcf.gz, csv, tsv)
+    /// Path to variants file [supported: vcf, csv, tsv; optionally gzipped (.gz)]
     #[arg(short, long)]
     pub variants: PathBuf,
 
-    /// Filepath of reads (Supported: bam, cram)
+    /// Path to reads file [supported: bam, cram]
     #[arg(short, long)]
     pub reads: PathBuf,
 
-    /// Class of variants to consider for analysis (Options: snv, indel)
-    #[arg(long, value_enum)]
+    /// Variant class to analyze
+    #[arg(short = 'c', long, value_enum)]
     pub varclass: VarClass,
 
-    /// Filepath of where csv output should be stored and filename of output
+    /// Path to csv output directory and filename of output
     #[arg(short, long)]
     pub output: PathBuf,
 
-    /// Optional sample identifier
-    #[arg(long)]
-    pub sample: Option<String>,
-
-    /// Optional label for reads file (if not provided will default to name of reads file)
-    #[arg(long)]
-    pub label: Option<String>,
-
-    /// Filepath of FASTA file associated with CRAM file (Required if reads is CRAM)
+    /// Path to FASTA reference for CRAM input (required if reads is CRAM)
     #[arg(short, long)]
     pub fasta: Option<PathBuf>,
 
-    /// Optional bin size gap (if not provided will default to 100 kb (100,000 bp))
+    /// Sample identifier
+    #[arg(long)]
+    pub sample: Option<String>,
+
+    /// Label for reads file (defaults to reads filename)
+    #[arg(long)]
+    pub label: Option<String>,
+
+    /// Bin size gap in base pairs (defaults to 100,000)
     #[arg(long)]
     pub gap: Option<u64>,
 }
