@@ -6,7 +6,7 @@ use crate::variant::VarClass;
 
 #[derive(Debug, Parser)]
 #[command(name = "rust-varlap")]
-#[command(version = "0.0.1")]
+#[command(version = "0.1.0-alpha.1")]
 #[command(about = "Quality control tool for genetic variants")]
 pub struct Cli {
     /// Filepath of variants (Supported: vcf, vcf.gz, csv, tsv)
