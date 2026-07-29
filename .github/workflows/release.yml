@@ -7,12 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       tag_override:
-        description: "Fake tag name for testing (e.g. v0.1.0-alpha.2)"
+        description: "Fake tag name for testing (e.g. v0.0.0-test)"
         required: true
         default: "v0.0.0-test"
 
 env:
-  TOOL_NAME: rust-varlap   # change to your binary name
+  TOOL_NAME: rust-varlap
+  TAG: ${{ github.event.inputs.tag_override || github.ref_name }}
 
 jobs:
   # ====================================================================== #
@@ -20,23 +21,11 @@ jobs:
   # ====================================================================== #
   build-binary:
     name: Build Rust binary
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # Cache Cargo registry + compiled deps — speeds up every run after the first
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+        uses: actions/checkout@v6
 
       # rust-htslib needs these system libraries at compile time
       - name: Install system dependencies
@@ -56,12 +45,17 @@ jobs:
       - name: Install Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
       - name: Build release binary
-        run: cargo build --release
+        run: cargo build --release --locked
 
       # Upload the binary so job 2 can pick it up without recompiling
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ env.TOOL_NAME }}-binary
           path: target/release/${{ env.TOOL_NAME }}
@@ -72,12 +66,12 @@ jobs:
   # ====================================================================== #
   build-sif:
     name: Build Singularity image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build-binary
 
     steps:
       - name: Download pre-built binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ${{ env.TOOL_NAME }}-binary
           path: artifact/
@@ -99,7 +93,6 @@ jobs:
       # so the final image needs only the runtime libraries, not a Rust toolchain.
       - name: Write Singularity definition file
         env:
-          TAG: ${{ github.event.inputs.tag_override || github.ref_name }}
           REPO: ${{ github.repository }}
         run: |
           cat > container.def <<EOF
@@ -121,7 +114,7 @@ jobs:
           %post
               # Runtime libraries that rust-htslib links against
               apt-get update && apt-get install -y --no-install-recommends \
-                  libcurl4 \
+                  libcurl4t64 \
                   zlib1g \
                   libbz2-1.0 \
                   liblzma5 \
@@ -137,55 +130,51 @@ jobs:
           EOF
 
       - name: Build .sif image
-        env:
-          TAG: ${{ github.event.inputs.tag_override || github.ref_name }}
         run: |
           SIF_NAME="${TOOL_NAME}_${TAG}.sif"
           echo "SIF_NAME=${SIF_NAME}" >> "$GITHUB_ENV"
           apptainer build --fakeroot "${SIF_NAME}" container.def
 
       - name: Upload SIF artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ env.TOOL_NAME }}-sif
           path: ${{ env.SIF_NAME }}
           retention-days: 1
 
   # ====================================================================== #
-  # JOB 3: Create the GitHub release and attach both files
+  # JOB 3: Publish the release — skipped on workflow_dispatch test runs
   # ====================================================================== #
   release:
     name: Publish GitHub release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [build-binary, build-sif]
     # skip release on manual runs
     if: github.event_name == 'push'
     permissions:
       contents: write
-
+ 
     steps:
       - name: Download binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ${{ env.TOOL_NAME }}-binary
           path: artifacts/
-
+ 
       - name: Download SIF
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ${{ env.TOOL_NAME }}-sif
           path: artifacts/
-
-      - name: Rename binary to include tag
-        env:
-          TAG: ${{ github.ref_name }}
+ 
+      - name: Rename binary to include tag and arch
         run: |
           mv artifacts/${{ env.TOOL_NAME }} \
              artifacts/${{ env.TOOL_NAME }}_${TAG}_linux-x86_64
-
+ 
       - name: Create release and upload assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
-          prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
+          prerelease: ${{ contains(env.TAG, '-alpha') || contains(env.TAG, '-beta') || contains(env.TAG, '-rc') }}
           generate_release_notes: true
           files: artifacts/*
