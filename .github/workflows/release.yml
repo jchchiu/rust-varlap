@@ -104,7 +104,7 @@ jobs:
         run: |
           cat > container.def <<EOF
           Bootstrap: docker
-          From: ubuntu:22.04
+          From: ubuntu:24.04
 
           %labels
               org.opencontainers.image.source  https://github.com/${REPO}
