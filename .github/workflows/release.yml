@@ -62,7 +62,69 @@ jobs:
           retention-days: 1
 
   # ====================================================================== #
-  # JOB 2: Package the pre-built binary into a .sif
+  # JOB 2: Test the raw binary against real test data.
+  #         Both the binary and the repo (test_data + compare script)
+  #         are available in this job.
+  # ====================================================================== #
+  test-binary:
+    name: Test binary
+    runs-on: ubuntu-24.04
+    needs: build-binary
+ 
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+ 
+      # Runtime libraries needed to run the binary outside a container
+      - name: Install runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libcurl4t64 zlib1g libbz2-1.0 liblzma5 libdeflate0
+ 
+      - name: Download binary
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ env.TOOL_NAME }}-binary
+          path: artifacts/
+ 
+      - name: Make binary executable
+        run: chmod +x artifacts/${{ env.TOOL_NAME }}
+ 
+      - name: Smoke test — --version
+        run: artifacts/${{ env.TOOL_NAME }} --version
+ 
+      - name: Smoke test — --help
+        run: artifacts/${{ env.TOOL_NAME }} --help
+ 
+      - name: Run tool on test data
+        run: |
+          artifacts/${{ env.TOOL_NAME }} \
+            --variants  test_data/chrM_heavy_stress.vcf \
+            --reads test_data/chrM_heavy_stress.sorted.bam \
+            --varclass snv \
+            --output test_data/actual_output.csv \
+ 
+      - name: Make compare script executable
+        run: chmod +x tests/compare_outputs.sh
+ 
+      - name: Compare output to gold standard
+        run: |
+          tests/compare_outputs.sh \
+            test_data/python.chrM_heavy_stress.snv.csv \
+            test_data/actual_output.csv \
+            test_data/binary-test-diff.txt
+ 
+      - name: Upload binary test diff
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: binary-test-diff
+          path: test_data/binary-test-diff.txt
+          retention-days: 7
+
+  # ====================================================================== #
+  # JOB 3: Package the pre-built binary into a .sif
   # ====================================================================== #
   build-sif:
     name: Build Singularity image
@@ -143,12 +205,80 @@ jobs:
           retention-days: 1
 
   # ====================================================================== #
-  # JOB 3: Publish the release — skipped on workflow_dispatch test runs
+  # JOB 4: Test the .sif and run the same regression test through
+  #         Apptainer to confirm the container environment is correct.
   # ====================================================================== #
+  test-sif:
+    name: Test Singularity image
+    runs-on: ubuntu-24.04
+    needs: build-sif
+ 
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+ 
+      - name: Install Apptainer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            wget ca-certificates fuse2fs fuse-overlayfs squashfs-tools uidmap
+          APPTAINER_VER="1.4.1"
+          wget -q "https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VER}/apptainer_${APPTAINER_VER}_amd64.deb"
+          sudo dpkg -i "apptainer_${APPTAINER_VER}_amd64.deb"
+ 
+      - name: Download SIF artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ env.TOOL_NAME }}-sif
+          path: artifacts/
+ 
+      - name: Inspect image labels
+        run: apptainer inspect artifacts/*.sif
+ 
+      - name: Smoke test — --version
+        run: apptainer run artifacts/*.sif --version
+ 
+      - name: Smoke test — --help
+        run: apptainer run artifacts/*.sif --help
+ 
+      - name: Run tool on test data inside container
+        run: |
+          apptainer exec \
+            -B "${{ github.workspace }}/test_data:/test_data" \
+            artifacts/*.sif \
+            ${{ env.TOOL_NAME }} \
+              --variants  test_data/chrM_heavy_stress.vcf \
+              --reads test_data/chrM_heavy_stress.sorted.bam \
+              --varclass snv \
+              --output test_data/actual_output.csv \
+ 
+      - name: Make compare script executable
+        run: chmod +x tests/compare_outputs.sh
+ 
+      - name: Compare output to gold standard
+        run: |
+          tests/compare_outputs.sh \
+            test_data/python.chrM_heavy_stress.snv.csv \
+            test_data/actual_output.csv \
+            test_data/sif-test-diff.txt
+ 
+      - name: Upload sif test diff
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: sif-test-diff
+          path: test_data/sif-test-diff.txt
+          retention-days: 7
+
+  # ====================================================================== #
+  # JOB 5: Publish the release — only runs if ALL tests pass,
+  #         and is skipped entirely on workflow_dispatch test runs.
+  # ====================================================================== #
+
   release:
     name: Publish GitHub release
     runs-on: ubuntu-24.04
-    needs: [build-binary, build-sif]
+    needs: [test-binary, test-sif]
     # skip release on manual runs
     if: github.event_name == 'push'
     permissions:
