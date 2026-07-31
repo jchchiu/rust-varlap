@@ -42,7 +42,7 @@ pub fn parse(
     }
 
     info!("Parsed reads successfully");
-    info!("Csv output can be found at: {:?}", csv_path.display());
+    info!("CSV output can be found at: {:?}", csv_path.display());
 
     Ok(())
 }

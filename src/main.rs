@@ -10,7 +10,7 @@ mod variant_parser;
 use anyhow::Result;
 use tracing::info;
 
-use crate::errors::{AppError, print_error};
+use crate::errors::AppError;
 
 fn run() -> Result<()> {
     let args = cli::parse();
@@ -45,6 +45,11 @@ fn run() -> Result<()> {
         )?;
     }
 
+    if args.merge {
+        info!("-------------------------------------------------------------------------------");
+        output::merge_output_csvs(&output_paths, &args.output)?;
+    }
+
     Ok(())
 }
 
@@ -57,7 +62,7 @@ fn main() {
 
     if let Err(err) = run() {
         if let Some(app_err) = err.downcast_ref::<AppError>() {
-            print_error(program, app_err);
+            crate::errors::print_error(program, app_err);
             std::process::exit(app_err.exit_code());
         }
 

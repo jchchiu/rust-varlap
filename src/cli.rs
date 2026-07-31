@@ -40,6 +40,10 @@ pub struct Cli {
     /// Bin size gap in base pairs (defaults to 100,000)
     #[arg(long)]
     pub gap: Option<u64>,
+
+    /// Merge output csvs if multiple BAMs are used
+    #[arg(long)]
+    pub merge: bool,
 }
 
 pub fn parse() -> Cli {
