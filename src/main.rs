@@ -15,22 +15,35 @@ use crate::errors::{AppError, print_error};
 fn run() -> Result<()> {
     let args = cli::parse();
 
+    info!("-------------------------------------------------------------------------------");
     let parsed_variants = variant_parser::parse(&args.variants, &args.varclass)?;
 
-    let mut binned_variants = binning::bin(
-        &parsed_variants,
-        args.gap, // ,&args.reads, args.fasta.as_deref()
+    let output_paths = output::make_output_csv_paths(
+        &args.output,
+        &args.reads,
+        &args.label,
     )?;
 
-    read_parser::parse(
-        &mut binned_variants,
-        &args.reads,
-        &args.output,
-        args.sample.as_deref(),
-        args.label.as_deref(),
-        &args.varclass,
-        args.fasta.as_deref(),
-    )?;
+    for (i, reads) in args.reads.iter().enumerate() {
+        info!("-------------------------------------------------------------------------------");
+
+        let label = args.label.get(i).and_then(|l| l.as_deref());
+
+        let mut binned_variants = binning::bin(
+            &parsed_variants,
+            args.gap,
+        )?;
+
+        read_parser::parse(
+            &mut binned_variants,
+            reads,
+            &output_paths[i],
+            args.sample.as_deref(),
+            label,
+            &args.varclass,
+            args.fasta.as_deref(),
+        )?;
+    }
 
     Ok(())
 }
@@ -53,5 +66,6 @@ fn main() {
         std::process::exit(1);
     }
 
+    info!("-------------------------------------------------------------------------------");
     info!("{} has completed successfully", program);
 }
