@@ -311,7 +311,7 @@ impl<'a> OutputRowINDEL<'a> {
 }
 
 const READ_BUF_SIZE: usize = 1024 * 1024; // 1 MiB per input file
-const WRITE_BUF_SIZE: usize = 1024 * 1024;
+pub const WRITE_BUF_SIZE: usize = 1024 * 1024;
 
 // Horizontally merges `input_paths` into `output_path`. The first file's
 // columns are kept in full; every subsequent file has its leading
