@@ -22,6 +22,75 @@ rust-varlap is a rewrite of [varlap](https://github.com/bjpop/varlap) from pytho
 - gzipped input variant files are now supported
 - Region mode with bed files/Outliers mode is not currently supported
 
+## Installation
+
+### Option 1: Pre-built binary (Linux x86\_64)
+
+Download the binary directly from the [Releases page](https://github.com/jchchiu/rust-varlap/releases).
+
+```bash
+VERSION="v0.1.0-alpha.2"
+
+wget https://github.com/jchchiu/rust-varlap/releases/download/${VERSION}/rust-varlap_${VERSION}_linux-x86_64
+chmod +x rust-varlap_${VERSION}_linux-x86_64
+
+# Optional: move to somewhere on your PATH
+mv rust-varlap_${VERSION}_linux-x86_64 ~/.local/bin/rust-varlap
+
+rust-varlap --version
+```
+
+---
+
+### Option 2: Apptainer / Singularity `.sif`
+
+Download the binary directly from the [Releases page](https://github.com/jchchiu/rust-varlap/releases).
+
+```bash
+VERSION="v0.1.0-alpha.2"
+
+wget https://github.com/jchchiu/rust-varlap/releases/download/${VERSION}/rust-varlap_${VERSION}.sif
+```
+
+**Run:**
+
+```bash
+# Directly via the runscript
+./rust-varlap_${VERSION}.sif --version
+
+# Or explicitly with apptainer
+apptainer run rust-varlap_${VERSION}.sif --version
+
+# Bind directories when data lives outside your home folder
+apptainer exec \
+  -B /scratch/$USER:/scratch/$USER \
+  rust-varlap_${VERSION}.sif \
+  rust-varlap --version
+```
+
+---
+
+### Option 3: Build from source
+
+Requires Rust ≥ 1.70 and a C toolchain.
+
+**Install:**
+
+```bash
+cargo install \
+  --git https://github.com/jchchiu/rust-varlap \
+  --tag v0.1.0-alpha.2 \
+  --locked
+```
+
+Places it in `~/.cargo/bin/rust-varlap` (which is on your `PATH` after a standard rustup install).
+
+```bash
+rust-varlap --version
+```
+
+---
+
 ## Notes
 - For csv files, multiple alt alleles are not supported (e.g. `A,T`). Please separate them into multiple rows (i.e. row for `A` alt, row for `T` alt)
 
