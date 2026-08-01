@@ -30,25 +30,22 @@ pub fn make_output_csv_paths(
 
         for (i, reads_path) in reads_paths.iter().enumerate() {
             let suffix = match labels.get(i).and_then(|l| l.as_deref()) {
-                Some(label) if !label.is_empty() => Some(label.to_string()),
+                Some(label) if !label.is_empty() => label.to_owned(),
                 _ => reads_path
                     .file_stem()
                     .and_then(|s| s.to_str())
-                    .map(|s| s.to_string()),
+                    .with_context(|| {
+                        format!("Invalid file stem for '{}'", reads_path.display())
+                    })?
+                    .to_owned(),
             };
 
-            let path = match suffix {
-                Some(suffix) => {
-                    let filename = match extension {
-                        Some(ext) => format!("{stem}_{suffix}.{ext}"),
-                        None => format!("{stem}_{suffix}"),
-                    };
-                    parent.join(filename)
-                }
-                None => csv_path.to_path_buf(),
+            let filename = match extension {
+                Some(ext) => format!("{stem}_{suffix}.{ext}"),
+                None => format!("{stem}_{suffix}"),
             };
 
-            paths.push(path);
+            paths.push(parent.join(filename));
         }
     }
 
