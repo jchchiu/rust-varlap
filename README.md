@@ -2,6 +2,12 @@
 
 rust-varlap is a rewrite of [varlap](https://github.com/bjpop/varlap) from python into rust.
 
+* [Assumptions](#assumptions)
+* [Changes](#changes)
+* [Installation](#installation)
+* [Usage](#usage)
+* [Notes](#notes)
+
 ## Assumptions
 - The input variant files (vcf, csv, tsv) are sorted by variant chromosome and position in ascending order
 - Variants are not filtered or interpreted
@@ -86,6 +92,68 @@ Places it in `~/.cargo/bin/rust-varlap` (which is on your `PATH` after a standar
 
 ```bash
 rust-varlap --version
+```
+
+## Usage
+
+```
+rust-varlap --variants <VARIANTS> --reads <READS>... --varclass <VARCLASS> --output <OUTPUT> [OPTIONS]
+```
+
+### Required Arguments
+
+| Flag | Description |
+|------|-------------|
+| `-v, --variants <PATH>` | Path to variants file (`.vcf`, `.csv`, `.tsv`; optionally gzipped with `.gz`) |
+| `-r, --reads <PATH>...` | Path to one or more reads files (`.bam`, `.cram`) |
+| `-c, --varclass <CLASS>` | Variant class to analyze |
+| `-o, --output <PATH>` | Path to output CSV (directory + filename) |
+
+### Optional Arguments
+
+| Flag | Description |
+|------|-------------|
+| `-f, --fasta <PATH>` | Path to FASTA reference (**required** if any reads file is CRAM) |
+| `--sample <NAME>` | Sample identifier |
+| `--label <LABEL>...` | Label(s) for reads file(s); defaults to filename if omitted |
+| `--gap <BP>` | Bin size gap in base pairs (default: `100,000`) |
+| `--merge` | Merge output CSVs when multiple BAMs are provided |
+
+### Examples
+
+Basic usage with a VCF and a single BAM:
+
+```
+rust-varlap \
+  --variants sample.vcf \
+  --reads sample.bam \
+  --varclass snv \
+  --output results/output.csv
+```
+
+Multiple BAMs with custom labels:
+
+```
+rust-varlap \
+  --variants cohort.tsv \
+  --reads tumor.bam normal.bam \
+  --label tumor normal \
+  --varclass indel \
+  --output results/cohort.csv
+```
+
+Multiple CRAMs with custom labels, merged output (requires a FASTA reference):
+
+```
+rust-varlap \
+  --sample patient1 \
+  --variants variants.vcf.gz \
+  --reads tumor.cram normal.cram  \
+  --label tumor normal \
+  --fasta reference.fasta \
+  --varclass snv \
+  --output results/output.csv \
+  --merge
 ```
 
 ---
