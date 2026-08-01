@@ -14,38 +14,42 @@ pub fn make_output_csv_paths(
     reads_paths: &[PathBuf],
     labels: &[Option<String>],
 ) -> Result<Vec<PathBuf>> {
-    let parent = csv_path.parent().unwrap_or_else(|| Path::new(""));
-
-    let stem = csv_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .with_context(|| format!("Invalid file stem for '{}'", csv_path.display()))?;
-
-    let extension = csv_path.extension().and_then(|s| s.to_str());
-
     let mut paths = Vec::with_capacity(reads_paths.len());
 
-    for (i, reads_path) in reads_paths.iter().enumerate() {
-        let suffix = match labels.get(i).and_then(|l| l.as_deref()) {
-            Some(label) if !label.is_empty() => Some(label.to_string()),
-            _ => reads_path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_string()),
-        };
+    if reads_paths.len() == 1 {
+        paths.push(csv_path.to_path_buf());
+    } else {
+        let parent = csv_path.parent().unwrap_or_else(|| Path::new(""));
 
-        let path = match suffix {
-            Some(suffix) => {
-                let filename = match extension {
-                    Some(ext) => format!("{stem}_{suffix}.{ext}"),
-                    None => format!("{stem}_{suffix}"),
-                };
-                parent.join(filename)
-            }
-            None => csv_path.to_path_buf(),
-        };
+        let stem = csv_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .with_context(|| format!("Invalid file stem for '{}'", csv_path.display()))?;
 
-        paths.push(path);
+        let extension = csv_path.extension().and_then(|s| s.to_str());
+
+        for (i, reads_path) in reads_paths.iter().enumerate() {
+            let suffix = match labels.get(i).and_then(|l| l.as_deref()) {
+                Some(label) if !label.is_empty() => Some(label.to_string()),
+                _ => reads_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string()),
+            };
+
+            let path = match suffix {
+                Some(suffix) => {
+                    let filename = match extension {
+                        Some(ext) => format!("{stem}_{suffix}.{ext}"),
+                        None => format!("{stem}_{suffix}"),
+                    };
+                    parent.join(filename)
+                }
+                None => csv_path.to_path_buf(),
+            };
+
+            paths.push(path);
+        }
     }
 
     Ok(paths)
