@@ -1,12 +1,56 @@
-use std::fs::File;
-use std::path::Path;
+use std::fs::{File};
+use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
-use csv::Writer;
+use anyhow::{bail, Context, Result};
+use csv::{ByteRecord, ReaderBuilder, Writer, WriterBuilder};
 use serde::Serialize;
+use tracing::info;
 
 use crate::features::{LocusFeatures, NormalizedLocusFeaturesRow};
 use crate::variant::{VarClass, Variant};
+
+pub fn make_output_csv_paths(
+    csv_path: &Path,
+    reads_paths: &[PathBuf],
+    labels: &[Option<String>],
+) -> Result<Vec<PathBuf>> {
+    let mut paths = Vec::with_capacity(reads_paths.len());
+
+    if reads_paths.len() == 1 {
+        paths.push(csv_path.to_path_buf());
+    } else {
+        let parent = csv_path.parent().unwrap_or_else(|| Path::new(""));
+
+        let stem = csv_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .with_context(|| format!("Invalid file stem for '{}'", csv_path.display()))?;
+
+        let extension = csv_path.extension().and_then(|s| s.to_str());
+
+        for (i, reads_path) in reads_paths.iter().enumerate() {
+            let suffix = match labels.get(i).and_then(|l| l.as_deref()) {
+                Some(label) if !label.is_empty() => label.to_owned(),
+                _ => reads_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .with_context(|| {
+                        format!("Invalid file stem for '{}'", reads_path.display())
+                    })?
+                    .to_owned(),
+            };
+
+            let filename = match extension {
+                Some(ext) => format!("{stem}_{suffix}.{ext}"),
+                None => format!("{stem}_{suffix}"),
+            };
+
+            paths.push(parent.join(filename));
+        }
+    }
+
+    Ok(paths)
+}
 
 pub fn write_header(
     writer: &mut Writer<File>,
@@ -265,6 +309,103 @@ impl<'a> OutputRowINDEL<'a> {
             read_features,
         }
     }
+}
+
+const READ_BUF_SIZE: usize = 1024 * 1024; // 1 MiB per input file
+pub const WRITE_BUF_SIZE: usize = 1024 * 1024;
+
+// Horizontally merges `input_paths` into `output_path`. The first file's
+// columns are kept in full; every subsequent file has its leading
+// `HEADER_FIELDS_SHARED` columns dropped before being appended.
+pub fn merge_output_csvs(input_paths: &[PathBuf], output_path: &Path) -> Result<()> {
+    if input_paths.is_empty() {
+        bail!("Internal error: cannot find any input paths.");
+    }
+ 
+    info!(
+        "Merging {} output CSVs", input_paths.len());
+ 
+    let n_shared = HEADER_FIELDS_SHARED.len();
+ 
+    let mut readers: Vec<_> = input_paths
+        .iter()
+        .map(|p| -> Result<_> {
+            let file = File::open(p)
+                .with_context(|| format!("Failed to open input CSV {}", p.display()))?;
+            Ok(ReaderBuilder::new()
+                .has_headers(true)
+                .buffer_capacity(READ_BUF_SIZE)
+                .from_reader(file))
+        })
+        .collect::<Result<_>>()?;
+ 
+    let out_file = File::create(output_path)
+        .with_context(|| format!("Failed to create output CSV {}", output_path.display()))?;
+    let mut wtr = WriterBuilder::new()
+        .buffer_capacity(WRITE_BUF_SIZE)
+        .from_writer(out_file);
+ 
+    // Merge & write the header.
+    let mut out_header = ByteRecord::new();
+    for (i, rdr) in readers.iter_mut().enumerate() {
+        let header = rdr
+            .byte_headers()
+            .with_context(|| format!("Failed to read header from {}", input_paths[i].display()))?;
+        if i == 0 {
+            out_header.extend(header.iter());
+        } else {
+            out_header.extend(header.iter().skip(n_shared));
+        }
+    }
+    wtr.write_byte_record(&out_header)
+        .context("Failed to write merged CSV header")?;
+ 
+    // Stream rows in lockstep, reusing buffers to avoid per-row allocation.
+    let mut records: Vec<ByteRecord> = vec![ByteRecord::new(); readers.len()];
+    let mut out_record = ByteRecord::new();
+    let mut row_num: u64 = 0;
+ 
+    loop {
+        let has_more = readers[0]
+            .read_byte_record(&mut records[0])
+            .with_context(|| format!("Failed reading row {row_num} from {}", input_paths[0].display()))?;
+        if !has_more {
+            break;
+        }
+        for (rdr, (rec, path)) in readers[1..]
+            .iter_mut()
+            .zip(records[1..].iter_mut().zip(input_paths[1..].iter()))
+        {
+            rdr.read_byte_record(rec)
+                .with_context(|| format!("Failed reading row {row_num} from {}", path.display()))?;
+        }
+ 
+        out_record.clear();
+        out_record.extend(records[0].iter());
+        for rec in records[1..].iter() {
+            out_record.extend(rec.iter().skip(n_shared));
+        }
+        wtr.write_byte_record(&out_record)
+            .with_context(|| format!("Failed writing merged row {row_num}"))?;
+ 
+        row_num += 1;
+    }
+ 
+    wtr.flush().context("Failed to flush merged CSV writer")?;
+ 
+    info!(
+        "Merging succesful. CSV output can be found at: {:?}",
+        output_path.display()
+    );
+ 
+    // Clean up redundant per-file outputs only if writer flushe is successful
+    for p in input_paths {
+        std::fs::remove_file(p)
+            .with_context(|| format!("Failed to remove original output CSV: {:?}", p.display()))?;
+        info!("Removed original output CSV: {:?}", p.display());
+    }
+ 
+    Ok(())
 }
 
 // Header fields

@@ -14,8 +14,8 @@ pub struct Cli {
     pub variants: PathBuf,
 
     /// Path to reads file [supported: bam, cram]
-    #[arg(short, long)]
-    pub reads: PathBuf,
+    #[arg(short, long, num_args = 1..)]
+    pub reads: Vec<PathBuf>,
 
     /// Variant class to analyze
     #[arg(short = 'c', long, value_enum)]
@@ -34,12 +34,16 @@ pub struct Cli {
     pub sample: Option<String>,
 
     /// Label for reads file (defaults to reads filename)
-    #[arg(long)]
-    pub label: Option<String>,
+    #[arg(long, num_args = 1..)]
+    pub label: Vec<Option<String>>,
 
     /// Bin size gap in base pairs (defaults to 100,000)
     #[arg(long)]
     pub gap: Option<u64>,
+
+    /// Merge output csvs if multiple BAMs are used
+    #[arg(long)]
+    pub merge: bool,
 }
 
 pub fn parse() -> Cli {

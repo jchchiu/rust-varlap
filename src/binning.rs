@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use anyhow::Result;
 // use rust_htslib::bam::Reader;
 // use rust_htslib::bam::{Record, Read};
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::errors::AppError;
 use crate::features::{LocusFeatures, LocusFeaturesIndel, LocusFeaturesSnv};
@@ -51,12 +51,12 @@ pub fn bin<'a>(
     // Use the gap provided, or set the bin size gap to default of 100kb
     let gap = match gap {
         Some(gap) => {
-            info!("Using user-provided bin gap: {} bp", gap);
+            debug!("Using user-provided bin gap: {} bp", gap);
             gap
         }
         None => {
             // Can maybe change it so that a value of -1 has no gap? (just parses whole chromosome)
-            info!("Using default bin gap: {} bp", DEFAULT_GAP);
+            debug!("Using default bin gap: {} bp", DEFAULT_GAP);
             DEFAULT_GAP
         }
     };

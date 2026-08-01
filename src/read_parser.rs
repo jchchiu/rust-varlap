@@ -26,6 +26,7 @@ pub fn parse(
 
     let mut csv_writer = WriterBuilder::new()
         .has_headers(false)
+        .buffer_capacity(crate::output::WRITE_BUF_SIZE)
         .from_path(csv_path)
         .with_context(|| format!("Failed to create output CSV '{}'", csv_path.display()))?;
 
@@ -42,7 +43,7 @@ pub fn parse(
     }
 
     info!("Parsed reads successfully");
-    info!("Csv output can be found at: {:?}", csv_path.display());
+    info!("CSV output can be found at: {:?}", csv_path.display());
 
     Ok(())
 }

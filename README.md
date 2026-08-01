@@ -2,6 +2,12 @@
 
 rust-varlap is a rewrite of [varlap](https://github.com/bjpop/varlap) from python into rust.
 
+* [Assumptions](#assumptions)
+* [Changes](#changes)
+* [Installation](#installation)
+* [Usage](#usage)
+* [Notes](#notes)
+
 ## Assumptions
 - The input variant files (vcf, csv, tsv) are sorted by variant chromosome and position in ascending order
 - Variants are not filtered or interpreted
@@ -13,8 +19,7 @@ rust-varlap is a rewrite of [varlap](https://github.com/bjpop/varlap) from pytho
     - Variants are binned by chromosome, and further binned if variants are some `n` distance apart (gap)
     - From preliminary testing, we have set the default gap size as 100 kb (100,000 bp) as it balances performance between files with sparsely and densely populated variants
     - An optional hyperparameter has can be used to control this gap size between bins; generally speaking, sparsely populated variants throughout chromosomes may perform better if gap size is small (e.g. `5 x mean read length`); conversely, for densely populated variants all throughout the chromosome performance may be better if gap size is large (e.g. 1 Mb or even more)
-- Multiple bam inputs are not currently supported
-    - Can be implemented if needed; however, output will most likely be separate csvs instead of a combined csv
+- Multiple bam/cram parsing is supported but by default they are not merged; there is an optional flag to merge outputs at the end if wanted
 - Changed header output field labels:
     - e.g. from [label + ' ' + 'ref avg nm'] to [label + ' ' + 'ref_avg_nm']
     - Easier to split header if necessary (split by ' ' will separate bam label and statistic field)
@@ -87,6 +92,68 @@ Places it in `~/.cargo/bin/rust-varlap` (which is on your `PATH` after a standar
 
 ```bash
 rust-varlap --version
+```
+
+## Usage
+
+```
+rust-varlap --variants <VARIANTS> --reads <READS>... --varclass <VARCLASS> --output <OUTPUT> [OPTIONS]
+```
+
+### Required Arguments
+
+| Flag | Description |
+|------|-------------|
+| `-v, --variants <PATH>` | Path to variants file (`.vcf`, `.csv`, `.tsv`; optionally gzipped with `.gz`) |
+| `-r, --reads <PATH>...` | Path to one or more reads files (`.bam`, `.cram`) |
+| `-c, --varclass <CLASS>` | Variant class to analyze |
+| `-o, --output <PATH>` | Path to output CSV (directory + filename) |
+
+### Optional Arguments
+
+| Flag | Description |
+|------|-------------|
+| `-f, --fasta <PATH>` | Path to FASTA reference (**required** if any reads file is CRAM) |
+| `--sample <NAME>` | Sample identifier |
+| `--label <LABEL>...` | Label(s) for reads file(s); defaults to filename if omitted |
+| `--gap <BP>` | Bin size gap in base pairs (default: `100,000`) |
+| `--merge` | Merge output CSVs when multiple BAMs are provided |
+
+### Examples
+
+Basic usage with a VCF and a single BAM:
+
+```
+rust-varlap \
+  --variants sample.vcf \
+  --reads sample.bam \
+  --varclass snv \
+  --output results/output.csv
+```
+
+Multiple BAMs with custom labels:
+
+```
+rust-varlap \
+  --variants cohort.tsv \
+  --reads tumor.bam normal.bam \
+  --label tumor normal \
+  --varclass indel \
+  --output results/cohort.csv
+```
+
+Multiple CRAMs with custom labels, merged output (requires a FASTA reference):
+
+```
+rust-varlap \
+  --sample patient1 \
+  --variants variants.vcf.gz \
+  --reads tumor.cram normal.cram  \
+  --label tumor normal \
+  --fasta reference.fasta \
+  --varclass snv \
+  --output results/output.csv \
+  --merge
 ```
 
 ---
