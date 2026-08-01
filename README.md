@@ -12,6 +12,7 @@ rust-varlap is a rewrite of [varlap](https://github.com/bjpop/varlap) from pytho
 - The input variant files (vcf, csv, tsv) are sorted by variant chromosome and position in ascending order
 - Variants are not filtered or interpreted
 - The input read files (bam, cram) are sorted by read chromosome and position in ascending order
+- BAM, CRAM, FASTA need index files associated (.bai, .crai, .fai, respectively); for VCF, it is needed if gzipped (.tbi)
 
 ## Changes
 - The algorithm now iterates over reads instead of variants
