@@ -57,10 +57,12 @@ fn open_indexed_reader(reads_path: &Path, fasta_path: Option<&Path>) -> Result<I
     match file_type {
         FileType::Bam => {}
         FileType::Cram => {
-            let fasta = fasta_path.ok_or(AppError::MissingCramReference)?;
-            reader.set_reference(fasta).with_context(|| {
-                format!("Failed to set CRAM reference to '{}'", fasta.display())
-            })?;
+            if fasta_path.is_some() {
+                let fasta = fasta_path.ok_or(AppError::MissingCramReference)?;
+                reader.set_reference(fasta).with_context(|| {
+                    format!("Failed to set CRAM reference to '{}'", fasta.display())
+                })?;
+            }
         }
     }
 
