@@ -445,6 +445,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn get_correct_vartype() {
+        let cases = [
+            // SNV
+            ("A", "T", VarType::Snv),
+            // INS
+            ("A", "AT", VarType::Ins),
+            // DEL
+            ("AT", "A", VarType::Del),
+        ];
+
+        for (refr, alt, expected) in cases {
+            assert_eq!(
+                get_var_type(refr, alt),
+                expected,
+                "REF={refr:?}, ALT={alt:?}"
+            );
+        }
+    }
+
+    #[test]
     fn is_only_dna_bases_cases() {
         let cases = [
             // Valid uppercase/lowercase
