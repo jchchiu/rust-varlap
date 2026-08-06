@@ -1,6 +1,6 @@
 [package]
 name = "rust-varlap"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 edition = "2024"
 description = "Quality control tool for genetic variants"
 readme = "README.md"

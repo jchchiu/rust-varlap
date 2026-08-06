@@ -35,7 +35,7 @@ rust-varlap is a rewrite of [varlap](https://github.com/bjpop/varlap) from pytho
 Download the binary directly from the [Releases page](https://github.com/jchchiu/rust-varlap/releases).
 
 ```bash
-VERSION="v0.1.0-alpha.3"
+VERSION="v0.1.0-alpha.4"
 
 wget https://github.com/jchchiu/rust-varlap/releases/download/${VERSION}/rust-varlap_${VERSION}_linux-x86_64
 chmod +x rust-varlap_${VERSION}_linux-x86_64
@@ -53,7 +53,7 @@ rust-varlap --version
 Download the binary directly from the [Releases page](https://github.com/jchchiu/rust-varlap/releases).
 
 ```bash
-VERSION="v0.1.0-alpha.3"
+VERSION="v0.1.0-alpha.4"
 
 wget https://github.com/jchchiu/rust-varlap/releases/download/${VERSION}/rust-varlap_${VERSION}.sif
 ```
@@ -85,7 +85,7 @@ Requires Rust ≥ 1.70 and a C toolchain.
 ```bash
 cargo install \
   --git https://github.com/jchchiu/rust-varlap \
-  --tag v0.1.0-alpha.3 \
+  --tag v0.1.0-alpha.4 \
   --locked
 ```
 
