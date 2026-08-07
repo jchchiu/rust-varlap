@@ -530,6 +530,22 @@ mod tests {
         assert_eq!(buf, bytes, "is_gzip must leave the cursor at offset 0");
     }
 
+    // Testing for delimiters
+    #[test]
+    fn delimiter_for_cases() {
+        let cases = [(FileType::Csv, b','), (FileType::Tsv, b'\t')];
+
+        for (file_type, expected) in cases {
+            assert_eq!(delimiter_for(file_type), expected, "file_type={file_type:?}");
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn delimiter_for_vcf_is_unreachable() {
+        let _ = delimiter_for(FileType::Vcf);
+    }
+
     // Testing for acceptable variants
     #[test]
     fn get_vartype_cases() {
