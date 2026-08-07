@@ -534,21 +534,17 @@ mod tests {
     #[test]
     fn get_vartype_cases() {
         let cases = [
-            // Snv
-            ("A", "T", VarType::Snv),
-            // Ins
-            ("A", "AT", VarType::Ins),
-            // Del
-            ("AT", "A", VarType::Del),
-            // Unknown
-            ("AT", "AT", VarType::Unknown),
+            ("snv", "A", "T", VarType::Snv),
+            ("insertion", "A", "AT", VarType::Ins),
+            ("deletion", "AT", "A", VarType::Del),
+            ("unknown", "AT", "AT", VarType::Unknown),
         ];
 
-        for (refr, alt, expected) in cases {
+        for (label, refr, alt, expected) in cases {
             assert_eq!(
                 get_vartype(refr, alt),
                 expected,
-                "REF={refr:?}, ALT={alt:?}"
+                "case: {label}, REF={refr:?}, ALT={alt:?}"
             );
         }
     }
@@ -556,23 +552,21 @@ mod tests {
     #[test]
     fn is_only_dna_bases_cases() {
         let cases = [
-            // Valid uppercase/lowercase
-            ("A", true),
-            ("a", true),
-            ("AaTtGgCc", true),
-            // Invalid bases
-            ("N", false),
-            ("?", false),
-            ("A-T", false),
-            ("A1T", false),
-            ("", false),
+            ("valid uppercase", "A", true),
+            ("valid lowercase", "a", true),
+            ("valid mixed case", "AaTtGgCc", true),
+            ("invalid n", "N", false),
+            ("invalid ?", "?", false),
+            ("invalid -", "A-T", false),
+            ("invalid integer", "A1T", false),
+            ("invalid empty", "", false),
         ];
 
-        for (sequence, expected) in cases {
+        for (label, sequence, expected) in cases {
             assert_eq!(
                 is_only_dna_bases(sequence),
                 expected,
-                "sequence={sequence:?}"
+                "case: {label}, sequence={sequence:?}"
             );
         }
     }
@@ -580,19 +574,19 @@ mod tests {
     #[test]
     fn is_desired_type_cases() {
         let cases = [
-            (VarClass::Snv, VarType::Snv, true),
-            (VarClass::Snv, VarType::Ins, false),
-            (VarClass::Snv, VarType::Del, false),
-            (VarClass::Indel, VarType::Snv, false),
-            (VarClass::Indel, VarType::Ins, true),
-            (VarClass::Indel, VarType::Del, true),
+            ("valid snv", VarClass::Snv, VarType::Snv, true),
+            ("invalid snv ins", VarClass::Snv, VarType::Ins, false),
+            ("invalid snv del", VarClass::Snv, VarType::Del, false),
+            ("invalid indel snv", VarClass::Indel, VarType::Snv, false),
+            ("valid indel ins", VarClass::Indel, VarType::Ins, true),
+            ("valid indel del", VarClass::Indel, VarType::Del, true),
         ];
 
-        for (varclass, vartype, expected) in cases {
+        for (label, varclass, vartype, expected) in cases {
             assert_eq!(
                 is_desired_type(&varclass, &vartype),
                 expected,
-                "varclass={varclass:?}, vartype={vartype:?}"
+                "case: {label}, varclass={varclass:?}, vartype={vartype:?}"
             );
         }
     }
@@ -600,31 +594,25 @@ mod tests {
     #[test]
     fn is_valid_indel_cases() {
         let cases = [
-            // Valid insertions
-            ("A", "AT", true),
-            ("AT", "ATG", true),
-            // Valid deletions
-            ("AT", "A", true),
-            ("ATG", "AT", true),
-            // Equal length
-            ("A", "T", false),
-            ("AT", "GC", false),
-            // Invalid insertion
-            ("A", "GA", false),
-            ("AT", "GAT", false),
-            // Invalid deletion
-            ("GA", "A", false),
-            ("GAT", "AT", false),
-            // Empty alleles
-            ("", "A", false),
-            ("A", "", false),
+            ("valid insertion", "A", "AT", true),
+            ("valid insertion", "AT", "ATG", true),
+            ("valid deletion", "AT", "A", true),
+            ("valid deletion", "ATG", "AT", true),
+            ("equal length", "A", "T", false),
+            ("equal length", "AT", "GC", false),
+            ("invalid insertion", "A", "GA", false),
+            ("invalid insertion", "AT", "GAT", false),
+            ("invalid deletion", "GA", "A", false),
+            ("invalid deletion", "GAT", "AT", false),
+            ("empty allele ref", "", "A", false),
+            ("empty allele alt", "A", "", false),
         ];
 
-        for (refr, alt, expected) in cases {
+        for (label, refr, alt, expected) in cases {
             assert_eq!(
                 is_valid_indel(refr, alt),
                 expected,
-                "REF={refr:?}, ALT={alt:?}"
+                "case: {label}, REF={refr:?}, ALT={alt:?}"
             );
         }
     }
@@ -632,25 +620,17 @@ mod tests {
     #[test]
     fn is_acceptable_variant_cases() {
         let cases = [
-            // Valid SNV
-            (VarClass::Snv, VarType::Snv, "A", "T", true),
-            // Valid insertion
-            (VarClass::Indel, VarType::Ins, "A", "AT", true),
-            // Valid deletion
-            (VarClass::Indel, VarType::Del, "AT", "A", true),
-            // Invalid reference base
-            (VarClass::Snv, VarType::Snv, "N", "T", false),
-            // Invalid alternate base
-            (VarClass::Snv, VarType::Snv, "A", "N", false),
-            // Wrong type
-            (VarClass::Snv, VarType::Ins, "A", "AT", false),
-            // Malformed insertion
-            (VarClass::Indel, VarType::Ins, "A", "GA", false),
-            // Malformed deletion
-            (VarClass::Indel, VarType::Del, "GA", "A", false),
+            ("valid snv", VarClass::Snv, VarType::Snv, "A", "T", true),
+            ("valid ins", VarClass::Indel, VarType::Ins, "A", "AT", true),
+            ("valid del", VarClass::Indel, VarType::Del, "AT", "A", true),
+            ("invalid ref base", VarClass::Snv, VarType::Snv, "N", "T", false),
+            ("invalid alt base", VarClass::Snv, VarType::Snv, "A", "N", false),
+            ("wrong var type", VarClass::Snv, VarType::Ins, "A", "AT", false),
+            ("invalid ins", VarClass::Indel, VarType::Ins, "A", "GA", false),
+            ("invalid del", VarClass::Indel, VarType::Del, "GA", "A", false),
         ];
 
-        for (varclass, vartype, refr, alt, expected) in cases {
+        for (label, varclass, vartype, refr, alt, expected) in cases {
             let row = VariantRow {
                 chrom: "chr1".to_string(),
                 pos: 1,
@@ -662,7 +642,7 @@ mod tests {
             assert_eq!(
                 is_acceptable_variant(&varclass, &vartype, &row, alt),
                 expected,
-                "varclass={varclass:?}, vartype={vartype:?}, REF={refr:?}, ALT={alt:?}"
+                "case: {label}, varclass={varclass:?}, vartype={vartype:?}, REF={refr:?}, ALT={alt:?}"
             );
         }
     }
