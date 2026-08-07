@@ -45,7 +45,7 @@ pub fn parse(variants_path: &Path, varclass: &VarClass) -> Result<ParsedVariants
     Ok(ParsedVariants { variants })
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum FileType {
     Vcf,
     Csv,
@@ -278,7 +278,7 @@ fn process_variant_row(
     skipped: &mut SkippedVariants,
 ) -> Result<()> {
     for alt in &row.alts {
-        let vartype = get_var_type(&row.refr, alt);
+        let vartype = get_vartype(&row.refr, alt);
 
         if is_acceptable_variant(varclass, &vartype, row, alt) {
             let variant = match varclass {
@@ -307,7 +307,7 @@ fn process_variant_row(
     Ok(())
 }
 
-fn get_var_type(refr: &str, alt: &str) -> VarType {
+fn get_vartype(refr: &str, alt: &str) -> VarType {
     if refr.len() == 1 && alt.len() == 1 {
         VarType::Snv
     } else if refr.len() > alt.len() {
@@ -443,21 +443,73 @@ fn is_valid_indel(refr: &str, alt: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
-    fn get_correct_vartype() {
+    fn detect_file_type_cases() {
         let cases = [
-            // SNV
+            ("variants.vcf", Some(FileType::Vcf)),
+            ("variants.csv", Some(FileType::Csv)),
+            ("variants.tsv", Some(FileType::Tsv)),
+            ("variants.vcf.gz", Some(FileType::Vcf)),
+            ("variants.csv.gz", Some(FileType::Csv)),
+            ("variants.tsv.gz", Some(FileType::Tsv)),
+        ];
+
+        for (filename, expected) in cases {
+            let path = PathBuf::from(filename);
+            let result = detect_file_type(&path);
+            match expected {
+                Some(ft) => assert_eq!(result.unwrap(), ft, "filename={filename:?}"),
+                None => assert!(result.is_err(), "filename={filename:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn detect_file_type_missing_extension() {
+        let path = PathBuf::from("variants");
+        assert!(matches!(
+            detect_file_type(&path),
+            Err(AppError::MissingVariantsExtension { .. })
+        ));
+    }
+
+    #[test]
+    fn detect_file_type_unsupported_extension() {
+        let path = PathBuf::from("variants.txt");
+        assert!(matches!(
+            detect_file_type(&path),
+            Err(AppError::UnsupportedVariantsFormat { .. })
+        ));
+    }
+
+    #[test]
+    fn detect_file_type_gz_with_no_inner_extension() {
+        // "variants.gz" -> stem "variants" has no extension of its own
+        let path = PathBuf::from("variants.gz");
+        assert!(matches!(
+            detect_file_type(&path),
+            Err(AppError::InvalidGzipName { .. })
+        ));
+    }
+
+    #[test]
+    fn get_vartype_cases() {
+        let cases = [
+            // Snv
             ("A", "T", VarType::Snv),
-            // INS
+            // Ins
             ("A", "AT", VarType::Ins),
-            // DEL
+            // Del
             ("AT", "A", VarType::Del),
+            // Unknown
+            ("AT", "AT", VarType::Unknown),
         ];
 
         for (refr, alt, expected) in cases {
             assert_eq!(
-                get_var_type(refr, alt),
+                get_vartype(refr, alt),
                 expected,
                 "REF={refr:?}, ALT={alt:?}"
             );
