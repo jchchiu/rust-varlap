@@ -444,7 +444,10 @@ fn is_valid_indel(refr: &str, alt: &str) -> bool {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::io::{Read, Write};
+    use tempfile::NamedTempFile;
 
+    // Testing for file type detection
     #[test]
     fn detect_file_type_cases() {
         let cases = [
@@ -494,6 +497,40 @@ mod tests {
         ));
     }
 
+    // Testing for gzip
+    fn file_with_bytes(bytes: &[u8]) -> File {
+        let mut tmp = NamedTempFile::new().unwrap();
+        tmp.write_all(bytes).unwrap();
+        tmp.reopen().unwrap() // fresh handle, positioned at 0
+    }
+
+    #[test]
+    fn is_gzip_cases() {
+        let cases = [
+            ("gzip magic", vec![0x1f, 0x8b, 0x08, 0x00], true),
+            ("plain text", b"chrom,pos,ref,alt\n".to_vec(), false),
+            ("too short", vec![0x1f], false),
+            ("empty file", vec![], false),
+        ];
+
+        for (label, bytes, expected) in cases {
+            let mut file = file_with_bytes(&bytes);
+            assert_eq!(is_gzip(&mut file).unwrap(), expected, "case: {label}");
+        }
+    }
+
+    #[test]
+    fn rewinds_to_start_after_check() {
+        let bytes = [0x1f, 0x8b, b'X', b'Y'];
+        let mut file = file_with_bytes(&bytes);
+        is_gzip(&mut file).unwrap();
+
+        let mut buf = [0u8; 4];
+        file.read_exact(&mut buf).unwrap();
+        assert_eq!(buf, bytes, "is_gzip must leave the cursor at offset 0");
+    }
+
+    // Testing for acceptable variants
     #[test]
     fn get_vartype_cases() {
         let cases = [
