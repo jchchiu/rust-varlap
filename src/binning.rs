@@ -135,7 +135,7 @@ fn get_variant_distance(current: &VariantInfo, previous: &Variant) -> Result<u64
 //     Ok(total as f64 / count as f64)
 // }
 
-fn make_variant_features<'a>(variant: &'a VariantInfo) -> Variant<'a> {
+pub fn make_variant_features<'a>(variant: &'a VariantInfo) -> Variant<'a> {
     match variant.vartype {
         VarType::Snv => Variant {
             info: variant,

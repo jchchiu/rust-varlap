@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::path::Path;
-use std::rc::Rc;
+// use std::rc::Rc;
 
 use anyhow::{Context, Result};
 use csv::{Writer, WriterBuilder};
@@ -143,7 +143,7 @@ fn process_bin(
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FileType {
     Bam,
     Cram,
@@ -210,7 +210,7 @@ fn get_ref_len(bam_reader: &IndexedReader, chrom: &str) -> Result<u64> {
     .into())
 }
 
-fn skip_read_check(read: &Rc<Record>) -> bool {
+fn skip_read_check(read: &Record) -> bool {
     // Check if read is orphan pair as this is skipped in the origial varlap pileup call (ignore_orphans=True)
     if read.is_paired() && !read.is_proper_pair() {
         return true;
@@ -227,4 +227,159 @@ fn skip_read_check(read: &Rc<Record>) -> bool {
     }
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::variant::{VariantInfo, VarType};
+    use rust_htslib::bam::record::Record;
+    use std::path::PathBuf;
+
+    // Detect file type tests
+    #[test]
+    fn detect_file_type_cases() {
+        let cases = [
+            ("reads.bam", FileType::Bam),
+            ("reads.cram", FileType::Cram),
+        ];
+
+        for (filename, expected) in cases {
+            let path = PathBuf::from(filename);
+            assert_eq!(detect_file_type(&path).unwrap(), expected, "filename={filename:?}");
+        }
+    }
+
+    #[test]
+    fn detect_file_type_missing_extension() {
+        let path = PathBuf::from("reads");
+        assert!(matches!(
+            detect_file_type(&path),
+            Err(AppError::MissingReadsExtension { .. })
+        ));
+    }
+
+    #[test]
+    fn detect_file_type_unsupported_extension() {
+        let path = PathBuf::from("reads.sam");
+        assert!(matches!(
+            detect_file_type(&path),
+            Err(AppError::UnsupportedReadsFormat { .. })
+        ));
+    }
+
+    // Get chrom info tests
+    fn variant(chrom: &str, pos: u64, vartype: VarType) -> VariantInfo {
+        VariantInfo {
+            chrom: chrom.to_string(),
+            pos,
+            vartype,
+            refr: "A".into(),
+            alt: "T".into(),
+        }
+    }
+
+    #[test]
+    fn get_chrom_info_cases() {
+        let cases = [
+            ("single variant", vec![100], (100, 100)),
+            ("two variants, ascending", vec![100, 250], (100, 250)),
+            ("many variants, only first/last matter", vec![100, 150, 175, 300], (100, 300)),
+        ];
+
+        for (label, positions, (expected_min, expected_max)) in cases {
+            let infos: Vec<VariantInfo> = positions
+                .into_iter()
+                .map(|pos| variant("chr1", pos, VarType::Snv))
+                .collect();
+
+            let variants: VecDeque<Variant> = infos
+                .iter()
+                .map(crate::binning::make_variant_features)
+                .collect();
+
+            let info = get_chrom_info(&variants);
+
+            assert_eq!(info.min_pos, expected_min, "case: {label}");
+            assert_eq!(info.max_pos, expected_max, "case: {label}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "INVARIANT BROKEN")]
+    fn get_chrom_info_panics_on_empty() {
+        let variants: VecDeque<Variant> = VecDeque::new();
+        let _ = get_chrom_info(&variants);
+    }
+
+    // Skip read check tests
+    fn make_read(
+        paired: bool,
+        proper_pair: bool,
+        unmapped: bool,
+        secondary: bool,
+        qc_fail: bool,
+        duplicate: bool,
+    ) -> Record {
+        let mut record = Record::new();
+
+        if paired {
+            record.set_paired();
+        } else {
+            record.unset_paired();
+        }
+
+        if proper_pair {
+            record.set_proper_pair();
+        } else {
+            record.unset_proper_pair();
+        }
+
+        if unmapped {
+            record.set_unmapped();
+        } else {
+            record.unset_unmapped();
+        }
+
+        if secondary {
+            record.set_secondary();
+        } else {
+            record.unset_secondary();
+        }
+
+        if qc_fail {
+            record.set_quality_check_failed();
+        } else {
+            record.unset_quality_check_failed();
+        }
+
+        if duplicate {
+            record.set_duplicate();
+        } else {
+            record.unset_duplicate();
+        }
+
+        record
+    }
+
+    #[test]
+    fn skip_read_check_cases() {
+        // (paired, proper_pair, unmapped, secondary, qc_fail, duplicate, expected_skip)
+        let cases = [
+            ("single-end, clean", (false, false, false, false, false, false), false),
+            ("paired, proper pair, clean", (true, true, false, false, false, false), false),
+            ("paired but not proper pair (orphan)", (true, false, false, false, false, false), true),
+            ("unmapped", (false, false, true, false, false, false), true),
+            ("secondary alignment", (false, false, false, true, false, false), true),
+            ("failed QC", (false, false, false, false, true, false), true),
+            ("duplicate", (false, false, false, false, false, true), true),
+            ("proper pair but also unmapped", (true, true, true, false, false, false), true),
+        ];
+
+        for (label, (paired, proper_pair, unmapped, secondary, qc_fail, duplicate), expected) in cases
+        {
+            let read = make_read(paired, proper_pair, unmapped, secondary, qc_fail, duplicate);
+            assert_eq!(skip_read_check(&read), expected, "case: {label}");
+        }
+    }
 }
