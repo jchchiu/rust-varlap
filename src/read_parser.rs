@@ -6,6 +6,7 @@ use std::rc::Rc;
 use anyhow::{Context, Result};
 use csv::{Writer, WriterBuilder};
 use rust_htslib::bam::{IndexedReader, Read, Record};
+use rust_htslib::bam::ext::BamRecordExtensions;
 use tracing::{debug, info};
 
 use crate::errors::AppError;
@@ -110,7 +111,7 @@ fn process_bin(
         }
 
         let read_start = record.pos() as u64;
-        let read_end = record.cigar().end_pos() as u64;
+        let read_end = record.reference_end() as u64;
 
         while let Some(var) = bin.variants.front() {
             // Pop and write the variant features if the start of the read is > than the variant position
