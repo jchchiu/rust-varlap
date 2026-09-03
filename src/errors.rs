@@ -23,6 +23,14 @@ pub enum AppError {
         previous_pos: u64,
     },
 
+    #[error("truncated or corrupted reads file")]
+    TruncatedReads {
+        chromosome: String,
+        bin_start: u64,
+        bin_end: u64,
+        consecutive_errors: u32,
+    },
+
     #[error("missing variants file extension")]
     MissingVariantsExtension { filename: PathBuf },
 
@@ -56,6 +64,7 @@ impl AppError {
             AppError::UnsupportedVariantsFormat { .. } => 3,
             AppError::UnsupportedReadsFormat { .. } => 3,
             AppError::UnsortedVariants { .. } => 3,
+            AppError::TruncatedReads { .. } => 3,
             AppError::MissingVariantsExtension { .. } => 3,
             AppError::MissingReadsExtension { .. } => 3,
             AppError::InvalidGzipName { .. } => 3,
@@ -106,6 +115,18 @@ pub fn print_error(program: &str, err: &AppError) {
                 error_pos, previous_pos
             );
             eprintln!("Please sort positions in ascending order before running again");
+        }
+
+        AppError::TruncatedReads {
+            chromosome,
+            bin_start,
+            bin_end,
+            consecutive_errors,
+        } => {
+            eprintln!("{program} ERROR: reads file may be truncated or corrupted");
+            eprintln!("{consecutive_errors} consecutive read errors in {chromosome}:{bin_start}-{bin_end}");
+            eprintln!("Check reads file for truncation (such as having EOF markers)");
+            eprintln!("Use a command such as `samtools quickcheck file.bam`");
         }
 
         AppError::MissingVariantsExtension { filename } => {

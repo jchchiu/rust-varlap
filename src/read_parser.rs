@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use csv::{Writer, WriterBuilder};
 use rust_htslib::bam::{IndexedReader, Read, Record};
 use rust_htslib::bam::ext::BamRecordExtensions;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::errors::AppError;
 use crate::output::{write_header, write_variant_row};
@@ -103,8 +103,29 @@ fn process_bin(
     let ref_seq_len = get_ref_len(reader, &bin.chrom)?;
 
     let mut record = Record::new();
+    // Check for truncated/corrupted BAM files
+    let mut consecutive_errors = 0u32;
+    const MAX_CONSECUTIVE_ERRORS: u32 = 10;
+
     while let Some(read_result) = reader.read(&mut record) {
-        read_result.context("Failed getting read from reads file")?;
+        if let Err(e) = read_result {
+            consecutive_errors += 1;
+            warn!(
+                "Skipping unreadable read in {}:{}-{}: {e}",
+                bin.chrom, chrom_info.min_pos, chrom_info.max_pos
+            );
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                return Err(AppError::TruncatedReads { 
+                    chromosome: bin.chrom.to_owned(),
+                    bin_start: chrom_info.min_pos,
+                    bin_end: chrom_info.max_pos,
+                    consecutive_errors,
+                }
+                .into());
+            }
+            continue;
+        }
+        consecutive_errors = 0;
 
         if skip_read_check(&record) {
             continue;
