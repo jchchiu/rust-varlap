@@ -111,7 +111,7 @@ impl ReadFeatures {
         self.align_len += self.query_alignment_length(read);
         self.map_qual += read.mapq() as u64;
 
-        for c in read.cigar().iter() {
+        for c in read.cigar_cached().expect("cigar not cached").iter() {
             match *c {
                 Cigar::Ins(len) | Cigar::Del(len) => self.indel += len as u64,
                 Cigar::SoftClip(len) | Cigar::HardClip(len) => self.clipping += len as u64,
@@ -155,7 +155,7 @@ impl ReadFeatures {
 
     pub fn query_alignment_length(&self, record: &Record) -> u64 {
         let mut len: u64 = 0;
-        for c in record.cigar().iter() {
+        for c in record.cigar_cached().expect("cigar not cached").iter() {
             match *c {
                 Cigar::Match(l) | Cigar::Equal(l) | Cigar::Diff(l) | Cigar::Ins(l) => {
                     len += l as u64
@@ -410,7 +410,7 @@ impl LocusFeaturesIndel {
         let mut result = Vec::new();
 
         // See https://samtools.github.io/hts-specs/SAMv1.pdf page 8 for how CIGAR consumes
-        for c in read.cigar().iter() {
+        for c in read.cigar_cached().expect("cigar not cached").iter() {
             match *c {
                 // Consumes both reference and query
                 Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {

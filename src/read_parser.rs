@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::path::Path;
-use std::rc::Rc;
 
 use anyhow::{Context, Result};
 use csv::{Writer, WriterBuilder};
@@ -103,8 +102,9 @@ fn process_bin(
 
     let ref_seq_len = get_ref_len(reader, &bin.chrom)?;
 
-    for read_result in reader.rc_records() {
-        let record = read_result.context("Failed getting read from reads file")?;
+    let mut record = Record::new();
+    while let Some(read_result) = reader.read(&mut record) {
+        read_result.context("Failed getting read from reads file")?;
 
         if skip_read_check(&record) {
             continue;
@@ -126,6 +126,10 @@ fn process_bin(
 
         for var in &mut bin.variants {
             let zero_based_pos = var.info.pos - 1;
+
+            if record.cigar_cached().is_none() {
+                record.cache_cigar();
+            }
 
             if zero_based_pos >= read_start && zero_based_pos < read_end {
                 var.count_locus_features(&record, zero_based_pos);
@@ -211,7 +215,7 @@ fn get_ref_len(bam_reader: &IndexedReader, chrom: &str) -> Result<u64> {
     .into())
 }
 
-fn skip_read_check(read: &Rc<Record>) -> bool {
+fn skip_read_check(read: &Record) -> bool {
     // Check if read is orphan pair as this is skipped in the origial varlap pileup call (ignore_orphans=True)
     if read.is_paired() && !read.is_proper_pair() {
         return true;
