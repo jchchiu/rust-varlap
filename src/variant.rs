@@ -73,7 +73,7 @@ impl<'a> Variant<'a> {
     }
 
     pub fn ref_pos_to_query_pos(&self, read: &Record, target_pos: u64) -> Option<u32> {
-        let cigar = read.cigar();
+        let cigar = read.cigar_cached().expect("cigar not cached");
         cigar.read_pos(target_pos as u32, false, false).ok()?
     }
 }
