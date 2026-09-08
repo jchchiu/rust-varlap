@@ -26,6 +26,7 @@ rust-varlap is a rewrite of [varlap](https://github.com/bjpop/varlap) from pytho
     - Easier to split header if necessary (split by ' ' will separate bam label and statistic field)
 - CRAM files are now supported
 - gzipped input variant files are now supported
+- Checks for truncated reads file if there are >= 10 consecutive read errors (doesn't check for EOF; can maybe check whether theres a EOF line at the start)
 - Region mode with bed files/Outliers mode is not currently supported
 
 ## Installation

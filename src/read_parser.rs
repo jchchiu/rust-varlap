@@ -1,12 +1,12 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::path::Path;
-use std::rc::Rc;
 
 use anyhow::{Context, Result};
 use csv::{Writer, WriterBuilder};
 use rust_htslib::bam::{IndexedReader, Read, Record};
-use tracing::{debug, info};
+use rust_htslib::bam::ext::BamRecordExtensions;
+use tracing::{debug, info, warn};
 
 use crate::errors::AppError;
 use crate::output::{write_header, write_variant_row};
@@ -102,15 +102,37 @@ fn process_bin(
 
     let ref_seq_len = get_ref_len(reader, &bin.chrom)?;
 
-    for read_result in reader.rc_records() {
-        let record = read_result.context("Failed getting read from reads file")?;
+    let mut record = Record::new();
+    // Check for truncated/corrupted BAM files
+    let mut consecutive_errors = 0u32;
+    const MAX_CONSECUTIVE_ERRORS: u32 = 10;
+
+    while let Some(read_result) = reader.read(&mut record) {
+        if let Err(e) = read_result {
+            consecutive_errors += 1;
+            warn!(
+                "Skipping unreadable read in {}:{}-{}: {e}",
+                bin.chrom, chrom_info.min_pos, chrom_info.max_pos
+            );
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                return Err(AppError::TruncatedReads { 
+                    chromosome: bin.chrom.to_owned(),
+                    bin_start: chrom_info.min_pos,
+                    bin_end: chrom_info.max_pos,
+                    consecutive_errors,
+                }
+                .into());
+            }
+            continue;
+        }
+        consecutive_errors = 0;
 
         if skip_read_check(&record) {
             continue;
         }
 
         let read_start = record.pos() as u64;
-        let read_end = record.cigar().end_pos() as u64;
+        let read_end = record.reference_end() as u64;
 
         while let Some(var) = bin.variants.front() {
             // Pop and write the variant features if the start of the read is > than the variant position
@@ -125,6 +147,10 @@ fn process_bin(
 
         for var in &mut bin.variants {
             let zero_based_pos = var.info.pos - 1;
+
+            if record.cigar_cached().is_none() {
+                record.cache_cigar();
+            }
 
             if zero_based_pos >= read_start && zero_based_pos < read_end {
                 var.count_locus_features(&record, zero_based_pos);
@@ -210,7 +236,7 @@ fn get_ref_len(bam_reader: &IndexedReader, chrom: &str) -> Result<u64> {
     .into())
 }
 
-fn skip_read_check(read: &Rc<Record>) -> bool {
+fn skip_read_check(read: &Record) -> bool {
     // Check if read is orphan pair as this is skipped in the origial varlap pileup call (ignore_orphans=True)
     if read.is_paired() && !read.is_proper_pair() {
         return true;
