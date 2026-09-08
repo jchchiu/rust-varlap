@@ -8,6 +8,7 @@ mod variant;
 mod variant_parser;
 
 use anyhow::Result;
+use rayon::prelude::*;
 use tracing::info;
 
 use crate::errors::AppError;
@@ -24,26 +25,31 @@ fn run() -> Result<()> {
         &args.label,
     )?;
 
-    for (i, reads) in args.reads.iter().enumerate() {
-        info!("-------------------------------------------------------------------------------");
+    // Initialize the thread pool for analyzing multiple BAM files in parallel
+    rayon::ThreadPoolBuilder::new().num_threads(args.threads).build_global()?;
 
-        let label = args.label.get(i).and_then(|l| l.as_deref());
+    args.reads
+        .par_iter()
+        .enumerate()
+        .try_for_each(|(i, reads)| -> Result<()> {
+            info!("-------------------------------------------------------------------------------");
 
-        let mut binned_variants = binning::bin(
-            &parsed_variants,
-            args.gap,
-        )?;
+            let label = args.label.get(i).and_then(|l| l.as_deref());
 
-        read_parser::parse(
-            &mut binned_variants,
-            reads,
-            &output_paths[i],
-            args.sample.as_deref(),
-            label,
-            &args.varclass,
-            args.fasta.as_deref(),
-        )?;
-    }
+            let mut binned_variants = binning::bin(&parsed_variants, args.gap)?;
+
+            read_parser::parse(
+                &mut binned_variants,
+                reads,
+                &output_paths[i],
+                args.sample.as_deref(),
+                label,
+                &args.varclass,
+                args.fasta.as_deref(),
+            )?;
+
+            Ok(())
+        })?;
 
     if args.merge {
         info!("-------------------------------------------------------------------------------");
