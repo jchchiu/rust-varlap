@@ -44,6 +44,10 @@ pub struct Cli {
     /// Merge output csvs if multiple BAMs are used
     #[arg(long)]
     pub merge: bool,
+
+    /// Number of threads for multithreading reads file
+    #[arg(short, long, default_value_t = 1)]
+    pub threads: usize,
 }
 
 pub fn parse() -> Cli {
