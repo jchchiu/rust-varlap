@@ -27,14 +27,14 @@ fn run() -> Result<()> {
 
     // Initialize the thread pool for analyzing multiple BAM files in parallel
     rayon::ThreadPoolBuilder::new().num_threads(args.threads).build_global()?;
-  
+
+    info!("-------------------------------------------------------------------------------");
     args.reads
         .par_iter()
         .enumerate()
         .try_for_each(|(i, reads)| -> Result<()> {
             let span = info_span!("sample", index = i, path = %reads.display());
             span.in_scope(|| -> Result<()> {
-                info!("-------------------------------------------------------------------------------");
 
                 let label = args.label.get(i).and_then(|l| l.as_deref());
 
