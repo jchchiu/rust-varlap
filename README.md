@@ -28,6 +28,7 @@ rust-varlap is a rewrite of [varlap](https://github.com/bjpop/varlap) from pytho
 - gzipped input variant files are now supported
 - Checks for truncated reads file if there are >= 10 consecutive read errors (doesn't check for EOF; can maybe check whether theres a EOF line at the start)
 - Region mode with bed files/Outliers mode is not currently supported
+- Implemented multithreading for parsing multiple reads files
 
 ## Installation
 
@@ -120,6 +121,7 @@ rust-varlap --variants <VARIANTS> --reads <READS>... --varclass <VARCLASS> --out
 | `--label <LABEL>...` | Label(s) for reads file(s); defaults to filename if omitted |
 | `--gap <BP>` | Bin size gap in base pairs (default: `100,000`) |
 | `--merge` | Merge output CSVs when multiple BAMs are provided |
+| `-t, --threads <N THREADS>` | Number of threads used if multithreading is wanted for multiple BAM/CRAM (default: `1`) |
 
 ### Examples
 
@@ -156,6 +158,7 @@ rust-varlap \
   --varclass snv \
   --output results/output.csv \
   --merge
+  --threads 2
 ```
 
 ---
@@ -171,7 +174,7 @@ rust-varlap \
 - ~~Improve error handling and add logging~~
 - Add unit tests/integration tests
 - Add region scanning mode (split into subcommands, 'allele' and 'region')
-- Implement multithreading
+- Implement multithreading for region mode
 - Deal with paired reads (implement something similar to mosdepth?)
 - Add option to sort variants if unsorted
 - Make ref/alt input optional (Still output stats that do not need this info)
