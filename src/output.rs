@@ -205,8 +205,8 @@ impl<'a> OutputRow<'a> {
 struct OutputRowSNV<'a> {
     chrom: &'a str,
     pos: u64,
-    refr: &'a str,
-    alt: &'a str,
+    refr: Option<&'a str>,
+    alt: Option<&'a str>,
     vartype: &'a str,
     pos_normalized: f64,
     sample: Option<&'a str>,
@@ -240,8 +240,8 @@ impl<'a> OutputRowSNV<'a> {
         Self {
             chrom: &var.info.chrom,
             pos: var.info.pos,
-            refr: &var.info.refr,
-            alt: &var.info.alt,
+            refr: var.info.refr.as_deref(),
+            alt: var.info.alt.as_deref(),
             vartype: var.info.vartype.as_str(),
             pos_normalized,
             sample,
@@ -266,8 +266,8 @@ impl<'a> OutputRowSNV<'a> {
 struct OutputRowINDEL<'a> {
     chrom: &'a str,
     pos: u64,
-    refr: &'a str,
-    alt: &'a str,
+    refr: Option<&'a str>,
+    alt: Option<&'a str>,
     vartype: &'a str,
     pos_normalized: f64,
     sample: Option<&'a str>,
@@ -293,8 +293,8 @@ impl<'a> OutputRowINDEL<'a> {
         Self {
             chrom: &var.info.chrom,
             pos: var.info.pos,
-            refr: &var.info.refr,
-            alt: &var.info.alt,
+            refr: var.info.refr.as_deref(),
+            alt: var.info.alt.as_deref(),
             vartype: var.info.vartype.as_str(),
             pos_normalized,
             sample,

@@ -285,15 +285,15 @@ fn process_variant_row(
                 VarClass::Snv => VariantInfo {
                     chrom: row.chrom.clone(),
                     pos: row.pos,
-                    refr: row.refr.clone(),
-                    alt: alt.to_string(),
+                    refr: Some(row.refr.clone()),
+                    alt: Some(alt.to_string()),
                     vartype,
                 },
                 VarClass::Indel => VariantInfo {
                     chrom: row.chrom.clone(),
                     pos: row.pos,
-                    refr: row.refr.clone(),
-                    alt: alt.to_string(),
+                    refr: Some(row.refr.clone()),
+                    alt: Some(alt.to_string()),
                     vartype,
                 },
             };

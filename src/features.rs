@@ -198,7 +198,7 @@ pub struct LocusFeaturesSnv {
 }
 
 impl LocusFeaturesSnv {
-    pub fn count(&mut self, read: &Record, refr: char, alt: char, query_pos: Option<u32>) {
+    pub fn count(&mut self, read: &Record, refr: Option<&str>, alt: Option<&str>, query_pos: Option<u32>) {
         let seq = read.seq();
         let base: Option<u8> = query_pos.and_then(|pos| {
             let i = pos as usize;
@@ -210,10 +210,16 @@ impl LocusFeaturesSnv {
 
             self.base_counts.count(base_char);
 
-            if base_char == refr {
-                self.common.ref_read_features.count(read, query_pos);
-            } else if base_char == alt {
-                self.common.alt_read_features.count(read, query_pos);
+            if let (Some(refr), Some(alt)) = (refr, alt) {
+                match base_char {
+                    c if Some(c) == refr.chars().next() => {
+                        self.common.ref_read_features.count(read, query_pos);
+                    }
+                    c if Some(c) == alt.chars().next() => {
+                        self.common.alt_read_features.count(read, query_pos);
+                    }
+                    _ => {}
+                }
             }
         }
 
@@ -242,25 +248,10 @@ impl AlleleCountsSnv {
         }
     }
 
-    pub fn count_for_base(&self, base: char) -> u32 {
-        match base {
-            'A' => self.a,
-            'C' => self.c,
-            'G' => self.g,
-            'T' => self.t,
-            'N' => self.n,
-            _ => 0,
-        }
-    }
-
-    fn depth(&self) -> u32 {
-        self.a + self.c + self.g + self.t + self.n
-    }
-
-    pub fn stats(&self, refr: char, alt: char) -> AlleleCountsSnvStats {
+    pub fn stats(&self, refr: Option<&str>, alt: Option<&str>) -> AlleleCountsSnvStats {
         let depth = self.depth();
-        let ref_count = self.count_for_base(refr);
-        let alt_count = self.count_for_base(alt);
+        let ref_count = self.count_for_allele(refr);
+        let alt_count = self.count_for_allele(alt);
         let alt_vaf = if depth > 0 {
             alt_count as f64 / depth as f64
         } else {
@@ -272,6 +263,27 @@ impl AlleleCountsSnv {
             ref_count,
             alt_count,
             alt_vaf,
+        }
+    }
+
+    fn depth(&self) -> u32 {
+        self.a + self.c + self.g + self.t + self.n
+    }
+
+    fn count_for_allele(&self, allele: Option<&str>) -> u32 {
+        allele
+            .and_then(|s| s.chars().next())
+            .map_or(0, |base| self.count_for_base(base))
+    }
+
+    fn count_for_base(&self, base: char) -> u32 {
+        match base {
+            'A' => self.a,
+            'C' => self.c,
+            'G' => self.g,
+            'T' => self.t,
+            'N' => self.n,
+            _ => 0,
         }
     }
 }
@@ -306,78 +318,80 @@ impl LocusFeaturesIndel {
     pub fn count(
         &mut self,
         read: &Record,
-        refr: &str,
-        alt: &str,
+        refr: Option<&str>,
+        alt: Option<&str>,
         ref_pos: u64,
         query_pos: Option<u32>,
         indel_type: &VarType,
     ) {
-        let start = self.get_indel_start_coord(ref_pos, refr, alt);
-        let size = refr.len().abs_diff(alt.len()) as u64;
-        let end = start + size - 1;
+        if let (Some(refr), Some(alt)) = (refr, alt){
+            let start = self.get_indel_start_coord(ref_pos, refr, alt);
+            let size = refr.len().abs_diff(alt.len()) as u64;
+            let end = start + size - 1;
 
-        let overlapping_indels = self.indels_overlapping_variant(read, start, end);
-        self.overlapping_indels_count += overlapping_indels.len() as u64;
+            let overlapping_indels = self.indels_overlapping_variant(read, start, end);
+            self.overlapping_indels_count += overlapping_indels.len() as u64;
 
-        let read_supports_alt = overlapping_indels.iter().any(|event| {
-            event.indel_type == *indel_type
-                && event.start == start
-                && event.end == end
-                && match indel_type {
-                    VarType::Del => true,
-                    VarType::Ins => event.bases == alt[1..],
-                    _ => false,
-                }
-        });
+            let read_supports_alt = overlapping_indels.iter().any(|event| {
+                event.indel_type == *indel_type
+                    && event.start == start
+                    && event.end == end
+                    && match indel_type {
+                        VarType::Del => true,
+                        VarType::Ins => event.bases == alt[1..],
+                        _ => false,
+                    }
+            });
 
-        let mut read_supports_ref = false;
-        if overlapping_indels.is_empty()
-            && let Some(qpos) = query_pos
-        {
-            let seq_bytes = read.seq().as_bytes();
-            let read_bases = match indel_type {
-                VarType::Ins => Some(
-                    (seq_bytes[qpos as usize] as char)
-                        .to_string()
-                        .to_ascii_uppercase(),
-                ),
-                VarType::Del => {
-                    // TEMP FIX: In python if string slice is out of bounds then it
-                    // truncates end value to length of vector
-                    // NOTE: MAY NEED TO REWRITE THIS PART
-                    if (qpos + (size as u32) + 1) as usize > seq_bytes.len() {
-                        Some(
-                            String::from_utf8(seq_bytes[qpos as usize..seq_bytes.len()].to_vec())
+            let mut read_supports_ref = false;
+            if overlapping_indels.is_empty()
+                && let Some(qpos) = query_pos
+            {
+                let seq_bytes = read.seq().as_bytes();
+                let read_bases = match indel_type {
+                    VarType::Ins => Some(
+                        (seq_bytes[qpos as usize] as char)
+                            .to_string()
+                            .to_ascii_uppercase(),
+                    ),
+                    VarType::Del => {
+                        // TEMP FIX: In python if string slice is out of bounds then it
+                        // truncates end value to length of vector
+                        // NOTE: MAY NEED TO REWRITE THIS PART
+                        if (qpos + (size as u32) + 1) as usize > seq_bytes.len() {
+                            Some(
+                                String::from_utf8(seq_bytes[qpos as usize..seq_bytes.len()].to_vec())
+                                    .unwrap()
+                                    .to_ascii_uppercase(),
+                            )
+                        } else {
+                            Some(
+                                String::from_utf8(
+                                    seq_bytes[qpos as usize..(qpos + (size as u32) + 1) as usize]
+                                        .to_vec(),
+                                )
                                 .unwrap()
                                 .to_ascii_uppercase(),
-                        )
-                    } else {
-                        Some(
-                            String::from_utf8(
-                                seq_bytes[qpos as usize..(qpos + (size as u32) + 1) as usize]
-                                    .to_vec(),
                             )
-                            .unwrap()
-                            .to_ascii_uppercase(),
-                        )
+                        }
+                        //
                     }
-                    //
+                    _ => None,
+                };
+
+                // FIX UNWRAP HERE
+                if let Some(read_bases) = read_bases
+                    && refr == read_bases
+                {
+                    read_supports_ref = true;
                 }
-                _ => None,
-            };
-
-            // FIX UNWRAP HERE
-            if let Some(read_bases) = read_bases
-                && refr == read_bases
-            {
-                read_supports_ref = true;
             }
-        }
 
-        if read_supports_ref {
-            self.common.ref_read_features.count(read, query_pos);
-        } else if read_supports_alt {
-            self.common.alt_read_features.count(read, query_pos);
+            if read_supports_ref {
+                self.common.ref_read_features.count(read, query_pos);
+            } else if read_supports_alt {
+                self.common.alt_read_features.count(read, query_pos);
+            }
         }
 
         self.common.all_read_features.count(read, query_pos);

@@ -158,8 +158,8 @@ mod tests {
             chrom: chrom.to_string(),
             pos,
             vartype,
-            refr: "A".into(),
-            alt: "T".into(),
+            refr: Some("A".into()),
+            alt: Some("T".into()),
         }
     }
 
