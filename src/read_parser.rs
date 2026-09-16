@@ -145,14 +145,15 @@ fn process_bin(
             }
         }
 
+        let mut cigar_cached_this_read = false;
         for var in &mut bin.variants {
             let zero_based_pos = var.info.pos - 1;
 
-            if record.cigar_cached().is_none() {
-                record.cache_cigar();
-            }
-
             if zero_based_pos >= read_start && zero_based_pos < read_end {
+                if !cigar_cached_this_read {
+                    record.cache_cigar();
+                    cigar_cached_this_read = true;
+                }
                 var.count_locus_features(&record, zero_based_pos);
             } else {
                 break;
