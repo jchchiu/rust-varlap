@@ -278,22 +278,24 @@ fn process_variant_row(
     skipped: &mut SkippedVariants,
 ) -> Result<()> {
     for alt in &row.alts {
-        let vartype = get_var_type(&row.refr, alt);
+        let (norm_pos, norm_refr, norm_alt) = normalize_variant(row.pos, &row.refr, alt);
 
-        if is_acceptable_variant(varclass, &vartype, row, alt) {
+        let vartype = get_var_type(&norm_refr, &norm_alt);
+
+        if is_acceptable_variant(varclass, &vartype, row, &norm_refr, &norm_alt) {
             let variant = match varclass {
                 VarClass::Snv => VariantInfo {
                     chrom: row.chrom.clone(),
-                    pos: row.pos,
-                    refr: Some(row.refr.clone()),
-                    alt: Some(alt.to_string()),
+                    pos: norm_pos,
+                    refr: Some(norm_refr.clone()),
+                    alt: Some(norm_alt.to_string()),
                     vartype,
                 },
                 VarClass::Indel => VariantInfo {
                     chrom: row.chrom.clone(),
-                    pos: row.pos,
-                    refr: Some(row.refr.clone()),
-                    alt: Some(alt.to_string()),
+                    pos: norm_pos,
+                    refr: Some(norm_refr.clone()),
+                    alt: Some(norm_alt.to_string()),
                     vartype,
                 },
             };
@@ -305,6 +307,33 @@ fn process_variant_row(
     }
 
     Ok(())
+}
+
+/// Left-align and minimize a REF/ALT pair
+fn normalize_variant(mut pos: u64, refr: &str, alt: &str) -> (u64, String, String) {
+    if refr.len() <= 1 && alt.len() <= 1 {
+        return (pos, refr.to_string(), alt.to_string());
+    }
+
+    let mut r: Vec<u8> = refr.bytes().collect();
+    let mut a: Vec<u8> = alt.bytes().collect();
+
+    while r.len() > 1 && a.len() > 1 && r.last() == a.last() {
+        r.pop();
+        a.pop();
+    }
+
+    let mut trim_front = 0;
+    while r.len() - trim_front > 1 && a.len() - trim_front > 1 && r[trim_front] == a[trim_front] {
+        trim_front += 1;
+    }
+    pos += trim_front as u64;
+
+    (
+        pos,
+        String::from_utf8(r[trim_front..].to_vec()).expect("Normalizing variant should not fail"),
+        String::from_utf8(a[trim_front..].to_vec()).expect("Normalizing variant should not fail"),
+    )
 }
 
 fn get_var_type(refr: &str, alt: &str) -> VarType {
@@ -361,17 +390,18 @@ fn is_acceptable_variant(
     varclass: &VarClass,
     vartype: &VarType,
     row: &VariantRow,
+    refr: &str,
     alt: &str,
     // max_indel_size: u32,
 ) -> bool {
-    if !is_only_dna_bases(&row.refr) || !is_only_dna_bases(alt) {
+    if !is_only_dna_bases(refr) || !is_only_dna_bases(alt) {
         debug!(
             "Skipped invalid variant at line {}: chrom={} pos={} \n 
             ref={} or alt={} contains non DNA bases (a, c, t, g)",
             row.line_no + 1,
             row.chrom,
             row.pos,
-            row.refr,
+            refr,
             alt,
         );
 
@@ -383,7 +413,7 @@ fn is_acceptable_variant(
             row.line_no + 1,
             row.chrom,
             row.pos,
-            row.refr,
+            refr,
             alt,
             varclass,
             vartype,
@@ -392,7 +422,7 @@ fn is_acceptable_variant(
         false
     // } else if !is_within_max_size(varclass, max_indel_size, refr, alt) {
     //     false
-    } else if matches!(varclass, VarClass::Indel) && !is_valid_indel(&row.refr, alt) {
+    } else if matches!(varclass, VarClass::Indel) && !is_valid_indel(refr, alt) {
         debug!(
             "Skipped invalid variant at line {}: chrom={} pos={} vartype={:?} \n 
             ref={} is not a valid indel",
@@ -400,7 +430,7 @@ fn is_acceptable_variant(
             row.chrom,
             row.pos,
             vartype,
-            row.refr,
+            refr,
         );
 
         false
@@ -551,7 +581,7 @@ mod tests {
             };
 
             assert_eq!(
-                is_acceptable_variant(&varclass, &vartype, &row, alt),
+                is_acceptable_variant(&varclass, &vartype, &row, refr, alt),
                 expected,
                 "varclass={varclass:?}, vartype={vartype:?}, REF={refr:?}, ALT={alt:?}"
             );
