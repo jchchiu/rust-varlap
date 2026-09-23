@@ -3,6 +3,7 @@ use std::cmp;
 use rust_htslib::bam::Record;
 use rust_htslib::bam::record::{Aux, Cigar};
 use serde::Serialize;
+use tracing::warn;
 
 use crate::variant::VarType;
 
@@ -338,48 +339,61 @@ impl LocusFeaturesIndel {
                     && event.end == end
                     && match indel_type {
                         VarType::Del => true,
-                        VarType::Ins => event.bases == alt[1..],
+                        VarType::Ins => {
+                            // event.bases == alt[1..]
+                            // CHECK HERE; WHY DO WE ASSUME alt[1..] What if REF is TA, ALT is TAA?
+                            // Are we assuming parsimonius, left-aligned normalized VCFs?
+                            // Should we not use get_indel_start_coord again?
+                            // self.get_indel_start_coord(0, refr, alt);
+                            let alt_indel_start = self.get_indel_start_coord(0, refr, alt);
+                            event.bases == alt[alt_indel_start as usize..]
+                        },
                         _ => false,
                     }
             });
 
+            // Compare the read sequence between the query position and the length of the reference given
+            //     to the given reference [qpos.. qpos + refr.len] to check 
             let mut read_supports_ref = false;
             if overlapping_indels.is_empty()
                 && let Some(qpos) = query_pos
             {
                 let seq_bytes = read.seq().as_bytes();
-                let read_bases = match indel_type {
-                    VarType::Ins => Some(
-                        (seq_bytes[qpos as usize] as char)
-                            .to_string()
-                            .to_ascii_uppercase(),
-                    ),
-                    VarType::Del => {
-                        // TEMP FIX: In python if string slice is out of bounds then it
-                        // truncates end value to length of vector
-                        // NOTE: MAY NEED TO REWRITE THIS PART
-                        if (qpos + (size as u32) + 1) as usize > seq_bytes.len() {
-                            Some(
-                                String::from_utf8(seq_bytes[qpos as usize..seq_bytes.len()].to_vec())
-                                    .unwrap()
-                                    .to_ascii_uppercase(),
-                            )
-                        } else {
-                            Some(
-                                String::from_utf8(
-                                    seq_bytes[qpos as usize..(qpos + (size as u32) + 1) as usize]
-                                        .to_vec(),
-                                )
-                                .unwrap()
-                                .to_ascii_uppercase(),
-                            )
-                        }
-                        //
-                    }
-                    _ => None,
-                };
+                // let read_bases = match indel_type {
+                //     VarType::Ins => Some(
+                //         (seq_bytes[qpos as usize] as char)
+                //             .to_string()
+                //             .to_ascii_uppercase(),
+                //     ),
+                //     VarType::Del => {
+                //         // TEMP FIX: In python if string slice is out of bounds then it
+                //         // truncates end value to length of vector
+                //         // NOTE: MAY NEED TO REWRITE THIS PART
+                //         if (qpos + (size as u32) + 1) as usize > seq_bytes.len() {
+                //             Some(
+                //                 String::from_utf8(seq_bytes[qpos as usize..seq_bytes.len()].to_vec())
+                //                     .unwrap()
+                //                     .to_ascii_uppercase(),
+                //             )
+                //         } else {
+                //             Some(
+                //                 String::from_utf8(
+                //                     seq_bytes[qpos as usize..(qpos + (size as u32) + 1) as usize]
+                //                         .to_vec(),
+                //                 )
+                //                 .unwrap()
+                //                 .to_ascii_uppercase(),
+                //             )
+                //         }
+                //         //
+                //     }
+                //     _ => None,
+                // };
+                let read_end = qpos as usize + refr.len();
+                let read_bases = seq_bytes
+                                                    .get(qpos as usize..read_end)
+                                                    .map(|bytes| String::from_utf8_lossy(bytes).to_ascii_uppercase());
 
-                // FIX UNWRAP HERE
                 if let Some(read_bases) = read_bases
                     && refr == read_bases
                 {
@@ -413,6 +427,7 @@ impl LocusFeaturesIndel {
     }
 
     // Determine the allele in the read at the locus of an INDEL variant
+    // Walk the CIGAR string and find any INDELS overlapping a variant
     pub fn indels_overlapping_variant(
         &self,
         read: &Record,
@@ -438,18 +453,32 @@ impl LocusFeaturesIndel {
 
                     if self.interval_overlaps(var_start, var_end, this_start, this_end) {
                         let seq_bytes = read.seq().as_bytes();
-                        let inserted_bases = String::from_utf8(
-                            seq_bytes[read_pos as usize..(read_pos + len as u64) as usize].to_vec(),
-                        )
-                        .unwrap()
-                        .to_ascii_uppercase();
+                        let end = read_pos as usize + len as usize;
+                        // let inserted_bases = String::from_utf8(
+                        //     seq_bytes[read_pos as usize..(read_pos + len as u64) as usize].to_vec(),
+                        // )
+                        // .unwrap()
+                        // .to_ascii_uppercase();
 
-                        result.push(IndelEvent {
-                            indel_type: VarType::Ins,
-                            start: this_start,
-                            end: this_end,
-                            bases: inserted_bases,
-                        });
+                        // result.push(IndelEvent {
+                        //     indel_type: VarType::Ins,
+                        //     start: this_start,
+                        //     end: this_end,
+                        //     bases: inserted_bases,
+                        // });
+                        if let Some(bytes) = seq_bytes.get(read_pos as usize..end) {
+                            result.push(IndelEvent {
+                                indel_type: VarType::Ins,
+                                start: this_start,
+                                end: this_end,
+                                bases: String::from_utf8_lossy(bytes).to_ascii_uppercase(),
+                            });
+                        } else {
+                            warn!(
+                                "read {}: CIGAR insertion at ref {} claims {} query bases past read length {} — skipping malformed record",
+                                String::from_utf8_lossy(read.qname()), this_start, len, seq_bytes.len()
+                            );
+                        }
                     }
 
                     read_pos += len as u64;
