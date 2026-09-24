@@ -211,17 +211,15 @@ impl LocusFeaturesSnv {
 
             self.base_counts.count(base_char);
 
-            // Change here in future if we want to process only one ref/alt
-            // Split the two into separate if statements?
-            if let (Some(refr), Some(alt)) = (refr, alt) {
-                match base_char {
-                    c if Some(c) == refr.chars().next() => {
-                        self.common.ref_read_features.count(read, query_pos);
-                    }
-                    c if Some(c) == alt.chars().next() => {
-                        self.common.alt_read_features.count(read, query_pos);
-                    }
-                    _ => {}
+            if let Some(refr) = refr {
+                if Some(base_char) == refr.chars().next() {
+                    self.common.ref_read_features.count(read, query_pos);
+                }
+            }
+
+            if let Some(alt) = alt {
+                if Some(base_char) == alt.chars().next() {
+                    self.common.alt_read_features.count(read, query_pos);
                 }
             }
         }
