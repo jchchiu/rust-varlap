@@ -3,6 +3,7 @@ use std::cmp;
 use rust_htslib::bam::Record;
 use rust_htslib::bam::record::{Aux, Cigar};
 use serde::Serialize;
+use tracing::warn;
 
 use crate::variant::VarType;
 
@@ -198,7 +199,7 @@ pub struct LocusFeaturesSnv {
 }
 
 impl LocusFeaturesSnv {
-    pub fn count(&mut self, read: &Record, refr: char, alt: char, query_pos: Option<u32>) {
+    pub fn count(&mut self, read: &Record, refr: Option<&str>, alt: Option<&str>, query_pos: Option<u32>) {
         let seq = read.seq();
         let base: Option<u8> = query_pos.and_then(|pos| {
             let i = pos as usize;
@@ -210,10 +211,18 @@ impl LocusFeaturesSnv {
 
             self.base_counts.count(base_char);
 
-            if base_char == refr {
-                self.common.ref_read_features.count(read, query_pos);
-            } else if base_char == alt {
-                self.common.alt_read_features.count(read, query_pos);
+            // Change here in future if we want to process only one ref/alt
+            // Split the two into separate if statements?
+            if let (Some(refr), Some(alt)) = (refr, alt) {
+                match base_char {
+                    c if Some(c) == refr.chars().next() => {
+                        self.common.ref_read_features.count(read, query_pos);
+                    }
+                    c if Some(c) == alt.chars().next() => {
+                        self.common.alt_read_features.count(read, query_pos);
+                    }
+                    _ => {}
+                }
             }
         }
 
@@ -242,25 +251,10 @@ impl AlleleCountsSnv {
         }
     }
 
-    pub fn count_for_base(&self, base: char) -> u32 {
-        match base {
-            'A' => self.a,
-            'C' => self.c,
-            'G' => self.g,
-            'T' => self.t,
-            'N' => self.n,
-            _ => 0,
-        }
-    }
-
-    fn depth(&self) -> u32 {
-        self.a + self.c + self.g + self.t + self.n
-    }
-
-    pub fn stats(&self, refr: char, alt: char) -> AlleleCountsSnvStats {
+    pub fn stats(&self, refr: Option<&str>, alt: Option<&str>) -> AlleleCountsSnvStats {
         let depth = self.depth();
-        let ref_count = self.count_for_base(refr);
-        let alt_count = self.count_for_base(alt);
+        let ref_count = self.count_for_allele(refr);
+        let alt_count = self.count_for_allele(alt);
         let alt_vaf = if depth > 0 {
             alt_count as f64 / depth as f64
         } else {
@@ -272,6 +266,27 @@ impl AlleleCountsSnv {
             ref_count,
             alt_count,
             alt_vaf,
+        }
+    }
+
+    fn depth(&self) -> u32 {
+        self.a + self.c + self.g + self.t + self.n
+    }
+
+    fn count_for_allele(&self, allele: Option<&str>) -> u32 {
+        allele
+            .and_then(|s| s.chars().next())
+            .map_or(0, |base| self.count_for_base(base))
+    }
+
+    fn count_for_base(&self, base: char) -> u32 {
+        match base {
+            'A' => self.a,
+            'C' => self.c,
+            'G' => self.g,
+            'T' => self.t,
+            'N' => self.n,
+            _ => 0,
         }
     }
 }
@@ -306,78 +321,93 @@ impl LocusFeaturesIndel {
     pub fn count(
         &mut self,
         read: &Record,
-        refr: &str,
-        alt: &str,
+        refr: Option<&str>,
+        alt: Option<&str>,
         ref_pos: u64,
         query_pos: Option<u32>,
         indel_type: &VarType,
     ) {
-        let start = self.get_indel_start_coord(ref_pos, refr, alt);
-        let size = refr.len().abs_diff(alt.len()) as u64;
-        let end = start + size - 1;
+        if let (Some(refr), Some(alt)) = (refr, alt){
+            let start = self.get_indel_start_coord(ref_pos, refr, alt);
+            let size = refr.len().abs_diff(alt.len()) as u64;
+            let end = start + size - 1;
 
-        let overlapping_indels = self.indels_overlapping_variant(read, start, end);
-        self.overlapping_indels_count += overlapping_indels.len() as u64;
+            let overlapping_indels = self.indels_overlapping_variant(read, start, end);
+            self.overlapping_indels_count += overlapping_indels.len() as u64;
 
-        let read_supports_alt = overlapping_indels.iter().any(|event| {
-            event.indel_type == *indel_type
-                && event.start == start
-                && event.end == end
-                && match indel_type {
-                    VarType::Del => true,
-                    VarType::Ins => event.bases == alt[1..],
-                    _ => false,
-                }
-        });
-
-        let mut read_supports_ref = false;
-        if overlapping_indels.is_empty()
-            && let Some(qpos) = query_pos
-        {
-            let seq_bytes = read.seq().as_bytes();
-            let read_bases = match indel_type {
-                VarType::Ins => Some(
-                    (seq_bytes[qpos as usize] as char)
-                        .to_string()
-                        .to_ascii_uppercase(),
-                ),
-                VarType::Del => {
-                    // TEMP FIX: In python if string slice is out of bounds then it
-                    // truncates end value to length of vector
-                    // NOTE: MAY NEED TO REWRITE THIS PART
-                    if (qpos + (size as u32) + 1) as usize > seq_bytes.len() {
-                        Some(
-                            String::from_utf8(seq_bytes[qpos as usize..seq_bytes.len()].to_vec())
-                                .unwrap()
-                                .to_ascii_uppercase(),
-                        )
-                    } else {
-                        Some(
-                            String::from_utf8(
-                                seq_bytes[qpos as usize..(qpos + (size as u32) + 1) as usize]
-                                    .to_vec(),
-                            )
-                            .unwrap()
-                            .to_ascii_uppercase(),
-                        )
+            let read_supports_alt = overlapping_indels.iter().any(|event| {
+                event.indel_type == *indel_type
+                    && event.start == start
+                    && event.end == end
+                    && match indel_type {
+                        VarType::Del => true,
+                        VarType::Ins => {
+                            // event.bases == alt[1..]
+                            // CHECK HERE; WHY DO WE ASSUME alt[1..] What if REF is TA, ALT is TAA?
+                            // Are we assuming parsimonius, left-aligned normalized VCFs?
+                            // Should we not use get_indel_start_coord again?
+                            // self.get_indel_start_coord(0, refr, alt);
+                            let alt_indel_start = self.get_indel_start_coord(0, refr, alt);
+                            event.bases == alt[alt_indel_start as usize..]
+                        },
+                        _ => false,
                     }
-                    //
-                }
-                _ => None,
-            };
+            });
 
-            // FIX UNWRAP HERE
-            if let Some(read_bases) = read_bases
-                && refr == read_bases
+            // Compare the read sequence between the query position and the length of the reference given
+            //     to the given reference [qpos.. qpos + refr.len] to check 
+            let mut read_supports_ref = false;
+            if overlapping_indels.is_empty()
+                && let Some(qpos) = query_pos
             {
-                read_supports_ref = true;
-            }
-        }
+                let seq_bytes = read.seq().as_bytes();
+                // let read_bases = match indel_type {
+                //     VarType::Ins => Some(
+                //         (seq_bytes[qpos as usize] as char)
+                //             .to_string()
+                //             .to_ascii_uppercase(),
+                //     ),
+                //     VarType::Del => {
+                //         // TEMP FIX: In python if string slice is out of bounds then it
+                //         // truncates end value to length of vector
+                //         // NOTE: MAY NEED TO REWRITE THIS PART
+                //         if (qpos + (size as u32) + 1) as usize > seq_bytes.len() {
+                //             Some(
+                //                 String::from_utf8(seq_bytes[qpos as usize..seq_bytes.len()].to_vec())
+                //                     .unwrap()
+                //                     .to_ascii_uppercase(),
+                //             )
+                //         } else {
+                //             Some(
+                //                 String::from_utf8(
+                //                     seq_bytes[qpos as usize..(qpos + (size as u32) + 1) as usize]
+                //                         .to_vec(),
+                //                 )
+                //                 .unwrap()
+                //                 .to_ascii_uppercase(),
+                //             )
+                //         }
+                //         //
+                //     }
+                //     _ => None,
+                // };
+                let read_end = qpos as usize + refr.len();
+                let read_bases = seq_bytes
+                                    .get(qpos as usize..read_end)
+                                    .map(|bytes| String::from_utf8_lossy(bytes).to_ascii_uppercase());
 
-        if read_supports_ref {
-            self.common.ref_read_features.count(read, query_pos);
-        } else if read_supports_alt {
-            self.common.alt_read_features.count(read, query_pos);
+                if let Some(read_bases) = read_bases
+                    && refr == read_bases
+                {
+                    read_supports_ref = true;
+                }
+            }
+
+            if read_supports_ref {
+                self.common.ref_read_features.count(read, query_pos);
+            } else if read_supports_alt {
+                self.common.alt_read_features.count(read, query_pos);
+            }
         }
 
         self.common.all_read_features.count(read, query_pos);
@@ -399,6 +429,7 @@ impl LocusFeaturesIndel {
     }
 
     // Determine the allele in the read at the locus of an INDEL variant
+    // Walk the CIGAR string and find any INDELS overlapping a variant
     pub fn indels_overlapping_variant(
         &self,
         read: &Record,
@@ -424,18 +455,32 @@ impl LocusFeaturesIndel {
 
                     if self.interval_overlaps(var_start, var_end, this_start, this_end) {
                         let seq_bytes = read.seq().as_bytes();
-                        let inserted_bases = String::from_utf8(
-                            seq_bytes[read_pos as usize..(read_pos + len as u64) as usize].to_vec(),
-                        )
-                        .unwrap()
-                        .to_ascii_uppercase();
+                        let end = read_pos as usize + len as usize;
+                        // let inserted_bases = String::from_utf8(
+                        //     seq_bytes[read_pos as usize..(read_pos + len as u64) as usize].to_vec(),
+                        // )
+                        // .unwrap()
+                        // .to_ascii_uppercase();
 
-                        result.push(IndelEvent {
-                            indel_type: VarType::Ins,
-                            start: this_start,
-                            end: this_end,
-                            bases: inserted_bases,
-                        });
+                        // result.push(IndelEvent {
+                        //     indel_type: VarType::Ins,
+                        //     start: this_start,
+                        //     end: this_end,
+                        //     bases: inserted_bases,
+                        // });
+                        if let Some(bytes) = seq_bytes.get(read_pos as usize..end) {
+                            result.push(IndelEvent {
+                                indel_type: VarType::Ins,
+                                start: this_start,
+                                end: this_end,
+                                bases: String::from_utf8_lossy(bytes).to_ascii_uppercase(),
+                            });
+                        } else {
+                            warn!(
+                                "read {}: CIGAR insertion at ref {} claims {} query bases past read length {} — skipping malformed record",
+                                String::from_utf8_lossy(read.qname()), this_start, len, seq_bytes.len()
+                            );
+                        }
                     }
 
                     read_pos += len as u64;

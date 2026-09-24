@@ -11,8 +11,8 @@ use crate::features::{
 pub struct VariantInfo {
     pub chrom: String,
     pub pos: u64,
-    pub refr: String,
-    pub alt: String,
+    pub refr: Option<String>,
+    pub alt: Option<String>,
     pub vartype: VarType,
 }
 
@@ -24,11 +24,10 @@ pub struct Variant<'a> {
 
 impl<'a> Variant<'a> {
     pub fn base_counts_stats(&self) -> Option<AlleleCountsSnvStats> {
-        let ref_char = self.info.refr.chars().next()?;
-        let alt_char = self.info.alt.chars().next()?;
-
         match &self.features {
-            LocusFeatures::Snv(f) => Some(f.base_counts.stats(ref_char, alt_char)),
+            LocusFeatures::Snv(f) => {
+                Some(f.base_counts.stats(self.info.refr.as_deref(), self.info.alt.as_deref()))
+            },
             LocusFeatures::Indel(_) => None,
         }
     }
@@ -45,17 +44,18 @@ impl<'a> Variant<'a> {
 
         match &mut self.features {
             LocusFeatures::Snv(f) => {
-                if let (Some(refr_char), Some(alt_char)) =
-                    (self.info.refr.chars().next(), self.info.alt.chars().next())
-                {
-                    f.count(read, refr_char, alt_char, qpos);
-                }
+                f.count(
+                    read,
+                    self.info.refr.as_deref(),
+                    self.info.alt.as_deref(),
+                    qpos
+                );
             }
             LocusFeatures::Indel(f) => {
                 f.count(
                     read,
-                    &self.info.refr,
-                    &self.info.alt,
+                    self.info.refr.as_deref(),
+                    self.info.alt.as_deref(),
                     ref_pos,
                     qpos,
                     &self.info.vartype,
