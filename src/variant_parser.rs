@@ -311,7 +311,7 @@ fn process_variant_row(
 
 /// Left-align and minimize a REF/ALT pair
 fn normalize_variant(mut pos: u64, refr: &str, alt: &str) -> (u64, String, String) {
-    if refr.len() <= 1 && alt.len() <= 1 {
+    if refr.len() <= 1 || alt.len() <= 1 {
         return (pos, refr.to_string(), alt.to_string());
     }
 
@@ -323,6 +323,7 @@ fn normalize_variant(mut pos: u64, refr: &str, alt: &str) -> (u64, String, Strin
         a.pop();
     }
 
+    // There shouldn't be a need to trim the front but put just in case (need to do more research)
     let mut trim_front = 0;
     while r.len() - trim_front > 1 && a.len() - trim_front > 1 && r[trim_front] == a[trim_front] {
         trim_front += 1;
@@ -473,6 +474,36 @@ fn is_valid_indel(refr: &str, alt: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_variant_cases() {
+        let cases = [
+            // SNV should return early as ref/alt len = 1 (no change)
+            ((100, "A", "G"), (100, "A".to_string(), "G".to_string())),
+            // INS should return early as ref len = 1 (no change)
+            ((100, "A", "AT"), (100, "A".to_string(), "AT".to_string())),
+            // DEL should return early as alt len = 1 (no change)
+            ((100, "CTG", "C"), (100, "CTG".to_string(), "C".to_string())),
+            // SNV with extra suffix (trim suffix)
+            ((100, "CAAAA", "AAAAA"), (100, "C".to_string(), "A".to_string())),
+            // INS tandem-repeat (trim suffix)
+            ((100, "CTG", "CTGTG"), (100, "C".to_string(), "CTG".to_string())),
+            // DEL tandem-repeat (trim suffix)
+            ((100, "AATCATCATC", "AATCATC"), (100, "AATC".to_string(), "A".to_string())),
+            // DELIN, no shared base at either end: nothing to trim
+            ((100, "ACG", "TT"), (100, "ACG".to_string(), "TT".to_string())),
+            // Just in case, shared prefix (Not sure if any variant callers output variants like this though)
+            ((100, "ACGT", "ACGTT"), (102, "G".to_string(), "GT".to_string())),
+        ];
+
+        for ((pos, refr, alt), expected) in cases {
+            assert_eq!(
+                normalize_variant(pos, refr, alt),
+                expected,
+                "pos={pos}, refr={refr:?}, alt={alt:?}"
+            );
+        }
+    }
 
     #[test]
     fn is_only_dna_bases_cases() {
