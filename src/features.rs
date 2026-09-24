@@ -393,8 +393,8 @@ impl LocusFeaturesIndel {
                 // };
                 let read_end = qpos as usize + refr.len();
                 let read_bases = seq_bytes
-                                                    .get(qpos as usize..read_end)
-                                                    .map(|bytes| String::from_utf8_lossy(bytes).to_ascii_uppercase());
+                                    .get(qpos as usize..read_end)
+                                    .map(|bytes| String::from_utf8_lossy(bytes).to_ascii_uppercase());
 
                 if let Some(read_bases) = read_bases
                     && refr == read_bases
