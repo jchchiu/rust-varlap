@@ -94,15 +94,6 @@ impl SkippedVariants {
     }
 }
 
-#[derive(Debug, Clone)]
-struct VariantRow {
-    chrom: String,
-    pos: u64,
-    refr: Option<String>,
-    alts: Vec<Option<String>>,
-    line_no: usize,
-}
-
 enum MaybeGzipReader {
     Plain(File),
     Gzip(MultiGzDecoder<File>),
@@ -128,6 +119,19 @@ fn open_variant_input(path: &Path) -> Result<MaybeGzipReader> {
     }
 }
 
+#[derive(Debug, Clone)]
+struct VariantRow {
+    chrom: String,
+    pos: u64,
+    refr: Option<String>,
+    alts: Vec<Option<String>>,
+    line_no: usize,
+}
+
+// ===================================================================
+// Parsing VCFs
+// ===================================================================
+
 fn parse_vcf(
     file_path: &Path,
     varclass: &VarClass,
@@ -137,6 +141,9 @@ fn parse_vcf(
     let input = open_variant_input(file_path)?;
     let reader = BufReader::new(input);
     
+    // For VCF override CLI allele mode input; always require strict
+    let alleles = AlleleMode::Strict;
+
     for (line_no, line_result) in reader.lines().enumerate() {
         let line = line_result.with_context(|| format!("Failed reading line {}", line_no + 1))?;
 
@@ -156,6 +163,12 @@ fn parse_vcf(
             continue;
         }
 
+        let refr = vcf_field(fields[3]).map(str::to_string);
+        let alts: Vec<Option<String>> = match vcf_field(fields[4]) {
+            Some(v) => v.split(',').map(|s| vcf_field(s).map(str::to_string)).collect(),
+            None => vec![None],
+        };
+
         let row = VariantRow {
             chrom: fields[0].to_string(),
             pos: match fields[1].parse() {
@@ -166,8 +179,8 @@ fn parse_vcf(
                     continue;
                 }
             },
-            refr: fields[3].to_string(),
-            alts: fields[4].split(',').map(|s| s.to_string()).collect(),
+            refr,
+            alts,
             line_no: line_no + 1,
         };
 
@@ -176,6 +189,20 @@ fn parse_vcf(
 
     Ok(())
 }
+
+fn vcf_field(raw: &str) -> Option<&str> {
+    let trimmed = raw.trim();
+    // "." in VCF is a missing value; change here if want to implement optional ref/alt for VCF
+    if trimmed.is_empty() || trimmed == "." {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+// ===================================================================
+// Parsing Delimited (CSV/TSV)
+// ===================================================================
 
 fn delimiter_for(file_type: FileType) -> u8 {
     match file_type {
@@ -198,7 +225,7 @@ fn get_header_index(headers: &StringRecord, fields: &[&str]) -> Result<usize, Ap
     })
 }
 
-fn field(record: &StringRecord, idx: usize) -> Option<&str> {
+fn delimited_field(record: &StringRecord, idx: usize) -> Option<&str> {
     record.get(idx).map(str::trim).filter(|s| !s.is_empty())
 }
 
@@ -212,6 +239,7 @@ fn parse_delimited(
 ) -> Result<()> {
     let input = open_variant_input(file_path)?;
 
+    // csv reader implements its own buffered reader
     let mut csv_reader = ReaderBuilder::new()
         .delimiter(delimiter_for(file_type))
         .has_headers(true)
@@ -257,8 +285,8 @@ fn parse_delimited(
         let (refr, alts) = match alleles {
             AlleleMode::NoAlleles => (None, vec![None]),
             _ => (
-                field(&record, ref_idx).map(str::to_string),
-                match field(&record, alt_idx) {
+                delimited_field(&record, ref_idx).map(str::to_string),
+                match delimited_field(&record, alt_idx) {
                     Some(v) => v.split(',').map(|s| Some(s.trim().to_string())).collect(),
                     None => vec![None],
                 },
@@ -287,6 +315,10 @@ fn parse_delimited(
 
     Ok(())
 }
+
+// ===================================================================
+// Processing Variant Rows
+// ===================================================================
 
 fn process_variant_row(
     row: &VariantRow,
@@ -652,8 +684,8 @@ mod tests {
             let row = VariantRow {
                 chrom: "chr1".to_string(),
                 pos: 1,
-                refr: refr.to_string(),
-                alts: vec![alt.to_string()],
+                refr: Some(refr.to_string()),
+                alts: vec![Some(alt.to_string())],
                 line_no: 0,
             };
 
