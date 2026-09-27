@@ -20,7 +20,7 @@ fn run() -> Result<()> {
     match cli.mode {
         Mode::Loci { common, args } => {
             info!("-------------------------------------------------------------------------------");
-            let parsed_variants = variant_parser::parse(&args.variants, &args.varclass, args.alleles)?;
+            let parsed_variants = variant_parser::parse(&args.variants, args.varclass, args.alleles)?;
 
             let output_paths = output::make_output_csv_paths(
                 &common.output,
@@ -49,7 +49,7 @@ fn run() -> Result<()> {
                             &output_paths[i],
                             common.sample.as_deref(),
                             label,
-                            &args.varclass,
+                            args.varclass,
                             common.fasta.as_deref(),
                         )?;
 
