@@ -207,6 +207,24 @@ mod tests {
         assert!(matches!(result.features, LocusFeatures::Indel(_)));
     }
 
+    #[test]
+    fn make_variant_features_creates_snv_for_unknown_vartype() {
+        let v = variant("chr1", 100, VarType::Unknown);
+
+        let result = make_variant_features(&v, VarClass::Snv);
+
+        assert!(matches!(result.features, LocusFeatures::Snv(_)));
+    }
+
+    #[test]
+    fn make_variant_features_creates_indel_for_unknown_vartype() {
+        let v = variant("chr1", 100, VarType::Unknown);
+
+        let result = make_variant_features(&v, VarClass::Indel);
+
+        assert!(matches!(result.features, LocusFeatures::Indel(_)));
+    }
+
     // Variant distance tests
     #[test]
     fn variant_distance_returns_difference() {
