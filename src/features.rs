@@ -323,7 +323,7 @@ impl LocusFeaturesIndel {
         alt: Option<&str>,
         ref_pos: u64,
         query_pos: Option<u32>,
-        indel_type: &VarType,
+        indel_type: VarType,
     ) {
         if let (Some(refr), Some(alt)) = (refr, alt){
             let start = self.get_indel_start_coord(ref_pos, refr, alt);
@@ -334,7 +334,7 @@ impl LocusFeaturesIndel {
             self.overlapping_indels_count += overlapping_indels.len() as u64;
 
             let read_supports_alt = overlapping_indels.iter().any(|event| {
-                event.indel_type == *indel_type
+                event.indel_type == indel_type
                     && event.start == start
                     && event.end == end
                     && match indel_type {

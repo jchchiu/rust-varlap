@@ -18,7 +18,7 @@ pub fn parse(
     csv_path: &Path,
     sample: Option<&str>,
     label: Option<&str>,
-    varclass: &VarClass,
+    varclass: VarClass,
     fasta_path: Option<&Path>,
     // ADD vector of [chrom/first variant index/length] here
 ) -> Result<()> {

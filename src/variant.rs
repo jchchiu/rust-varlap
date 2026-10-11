@@ -58,7 +58,7 @@ impl<'a> Variant<'a> {
                     self.info.alt.as_deref(),
                     ref_pos,
                     qpos,
-                    &self.info.vartype,
+                    self.info.vartype,
                 );
             }
         }

@@ -11,7 +11,7 @@ use crate::cli::AlleleMode;
 use crate::errors::AppError;
 use crate::variant::{ParsedVariants, VarClass, VarType, VariantInfo};
 
-pub fn parse(variants_path: &Path, varclass: &VarClass, alleles: AlleleMode) -> Result<ParsedVariants> {
+pub fn parse(variants_path: &Path, varclass: VarClass, alleles: AlleleMode) -> Result<ParsedVariants> {
     let file_type = detect_file_type(variants_path)?;
 
     info!(
@@ -134,7 +134,7 @@ struct VariantRow {
 
 fn parse_vcf(
     file_path: &Path,
-    varclass: &VarClass,
+    varclass: VarClass,
     variants: &mut Vec<VariantInfo>,
     skipped: &mut SkippedVariants,
 ) -> Result<()> {
@@ -232,7 +232,7 @@ fn delimited_field(record: &StringRecord, idx: usize) -> Option<&str> {
 fn parse_delimited(
     file_path: &Path,
     file_type: FileType,
-    varclass: &VarClass,
+    varclass: VarClass,
     alleles: AlleleMode,
     variants: &mut Vec<VariantInfo>,
     skipped: &mut SkippedVariants,
@@ -322,7 +322,7 @@ fn parse_delimited(
 
 fn process_variant_row(
     row: &VariantRow,
-    varclass: &VarClass,
+    varclass: VarClass,
     alleles: AlleleMode,
     variants: &mut Vec<VariantInfo>,
     skipped: &mut SkippedVariants,
@@ -332,7 +332,7 @@ fn process_variant_row(
             (Some(r), Some(a)) => {
                 let (norm_pos, norm_refr, norm_alt) = normalize_variant(row.pos, r, a);
                 let vartype = get_var_type(&norm_refr, &norm_alt);
-                is_acceptable_variant(varclass, &vartype, row, &norm_refr, &norm_alt)
+                is_acceptable_variant(varclass, vartype, row, &norm_refr, &norm_alt)
                     .then(|| VariantInfo {
                         chrom: row.chrom.clone(),
                         pos: norm_pos,
@@ -369,7 +369,7 @@ fn process_variant_row(
 /// Longest unpaired allele accepted for now; figure out how to handle INDELS
 const MAX_SINGLE_ALLELE_LEN: usize = 1;
 
-fn is_acceptable_single_allele(varclass: &VarClass, allele: &str) -> bool {
+fn is_acceptable_single_allele(varclass: VarClass, allele: &str) -> bool {
     is_only_dna_bases(allele)
         && match varclass {
             VarClass::Snv => allele.len() == 1,
@@ -466,8 +466,8 @@ fn is_gzip(file: &mut File) -> Result<bool> {
 // }
 
 fn is_acceptable_variant(
-    varclass: &VarClass,
-    vartype: &VarType,
+    varclass: VarClass,
+    vartype: VarType,
     row: &VariantRow,
     refr: &str,
     alt: &str,
@@ -525,7 +525,7 @@ fn is_only_dna_bases(sequence: &str) -> bool {
             .all(|b| matches!(b.to_ascii_uppercase(), b'A' | b'T' | b'G' | b'C'))
 }
 
-fn is_desired_type(varclass: &VarClass, vartype: &VarType) -> bool {
+fn is_desired_type(varclass: VarClass, vartype: VarType) -> bool {
     match varclass {
         VarClass::Snv => matches!(vartype, VarType::Snv),
         VarClass::Indel => matches!(vartype, VarType::Ins | VarType::Del),
@@ -620,7 +620,7 @@ mod tests {
 
         for (varclass, vartype, expected) in cases {
             assert_eq!(
-                is_desired_type(&varclass, &vartype),
+                is_desired_type(varclass, vartype),
                 expected,
                 "varclass={varclass:?}, vartype={vartype:?}"
             );
@@ -690,7 +690,7 @@ mod tests {
             };
 
             assert_eq!(
-                is_acceptable_variant(&varclass, &vartype, &row, refr, alt),
+                is_acceptable_variant(varclass, vartype, &row, refr, alt),
                 expected,
                 "varclass={varclass:?}, vartype={vartype:?}, REF={refr:?}, ALT={alt:?}"
             );
