@@ -21,7 +21,7 @@ fn run() -> Result<()> {
         Mode::Loci { common, args } => {
             info!("-------------------------------------------------------------------------------");
             let parsed_variants = variant_parser::parse(&args.variants, &args.varclass, args.alleles)?;
-            
+
             let output_paths = output::make_output_csv_paths(
                 &common.output,
                 &common.reads,
@@ -41,8 +41,8 @@ fn run() -> Result<()> {
 
                         let label = common.label.get(i).and_then(|l| l.as_deref());
 
-                        let mut binned_variants = binning::bin(&parsed_variants, common.gap)?;
-
+                        let mut binned_variants = binning::bin(&parsed_variants, common.gap, args.varclass)?;
+                        
                         read_parser::parse(
                             &mut binned_variants,
                             reads,

@@ -10,13 +10,14 @@ use tracing::{debug, info};
 use crate::errors::AppError;
 use crate::features::{LocusFeatures, LocusFeaturesIndel, LocusFeaturesSnv};
 // use crate::read_parser::{detect_file_type, FileType};
-use crate::variant::{BinnedVariants, ParsedVariants, VarType, Variant, VariantBin, VariantInfo};
+use crate::variant::{BinnedVariants, ParsedVariants, VarClass, VarType, Variant, VariantBin, VariantInfo};
 
 pub fn bin<'a>(
     parsed_variants: &'a ParsedVariants,
     // reads_path: &Path,
     // fasta_path: Option<&Path>,
     gap: Option<u64>,
+    varclass: VarClass,
 ) -> Result<BinnedVariants<'a>> {
     let mut bins: Vec<VariantBin> = Vec::new();
 
@@ -76,7 +77,7 @@ pub fn bin<'a>(
             false
         };
 
-        let variant_features = make_variant_features(variant);
+        let variant_features = make_variant_features(variant, varclass);
 
         if should_append {
             bins.last_mut()
@@ -135,7 +136,7 @@ fn get_variant_distance(current: &VariantInfo, previous: &Variant) -> Result<u64
 //     Ok(total as f64 / count as f64)
 // }
 
-fn make_variant_features<'a>(variant: &'a VariantInfo) -> Variant<'a> {
+fn make_variant_features<'a>(variant: &'a VariantInfo, varclass: VarClass) -> Variant<'a> {
     match variant.vartype {
         VarType::Snv => Variant {
             info: variant,
@@ -145,7 +146,17 @@ fn make_variant_features<'a>(variant: &'a VariantInfo) -> Variant<'a> {
             info: variant,
             features: LocusFeatures::Indel(LocusFeaturesIndel::default()),
         },
-        VarType::Unknown => unreachable!(),
+        // Change here when implementing region mode (if mode = loci match, if mode = region unreachable)
+        VarType::Unknown => match varclass {
+            VarClass::Snv => Variant {
+                info: variant,
+                features: LocusFeatures::Snv(LocusFeaturesSnv::default()),
+            },
+            VarClass::Indel => Variant {
+                info: variant,
+                features: LocusFeatures::Indel(LocusFeaturesIndel::default()),
+            },
+        },
     }
 }
 
@@ -172,7 +183,7 @@ mod tests {
     fn make_variant_features_creates_snv() {
         let v = variant("chr1", 100, VarType::Snv);
 
-        let result = make_variant_features(&v);
+        let result = make_variant_features(&v, VarClass::Snv);
 
         assert!(matches!(result.features, LocusFeatures::Snv(_)));
         assert_eq!(result.info.pos, 100);
@@ -182,7 +193,7 @@ mod tests {
     fn make_variant_features_creates_indel_for_insertions() {
         let v = variant("chr1", 100, VarType::Ins);
 
-        let result = make_variant_features(&v);
+        let result = make_variant_features(&v, VarClass::Indel);
 
         assert!(matches!(result.features, LocusFeatures::Indel(_)));
     }
@@ -191,7 +202,7 @@ mod tests {
     fn make_variant_features_creates_indel_for_deletions() {
         let v = variant("chr1", 100, VarType::Del);
 
-        let result = make_variant_features(&v);
+        let result = make_variant_features(&v, VarClass::Indel);
 
         assert!(matches!(result.features, LocusFeatures::Indel(_)));
     }
@@ -200,7 +211,7 @@ mod tests {
     #[test]
     fn variant_distance_returns_difference() {
         let previous_variant = variant("chr1", 100, VarType::Snv);
-        let previous = make_variant_features(&previous_variant);
+        let previous = make_variant_features(&previous_variant, VarClass::Snv);
         let current = variant("chr1", 150, VarType::Snv);
 
         let distance = get_variant_distance(&current, &previous).unwrap();
@@ -211,7 +222,7 @@ mod tests {
     #[test]
     fn variant_distance_zero_when_same_position() {
         let previous_variant = variant("chr1", 100, VarType::Snv);
-        let previous = make_variant_features(&previous_variant);
+        let previous = make_variant_features(&previous_variant, VarClass::Snv);
         let current = variant("chr1", 100, VarType::Snv);
 
         let distance = get_variant_distance(&current, &previous).unwrap();
@@ -222,7 +233,7 @@ mod tests {
     #[test]
     fn variant_distance_errors_when_unsorted() {
         let previous_variant = variant("chr1", 200, VarType::Snv);
-        let previous = make_variant_features(&previous_variant);
+        let previous = make_variant_features(&previous_variant, VarClass::Snv);
         let current = variant("chr1", 100, VarType::Snv);
 
         let err = get_variant_distance(&current, &previous).unwrap_err();
@@ -245,7 +256,7 @@ mod tests {
     fn bin_empty_variants() {
         let parsed = parsed(vec![]);
 
-        let bins = bin(&parsed, Some(10)).unwrap();
+        let bins = bin(&parsed, Some(10), VarClass::Snv).unwrap();
 
         assert!(bins.bins.is_empty());
     }
@@ -254,7 +265,7 @@ mod tests {
     fn bin_single_variant() {
         let parsed = parsed(vec![variant("chr1", 100, VarType::Snv)]);
 
-        let bins = bin(&parsed, Some(10)).unwrap();
+        let bins = bin(&parsed, Some(10), VarClass::Snv).unwrap();
 
         assert_eq!(bins.bins.len(), 1);
         assert_eq!(bins.bins[0].variants.len(), 1);
@@ -268,7 +279,7 @@ mod tests {
             variant("chr1", 110, VarType::Snv),
         ]);
 
-        let bins = bin(&parsed, Some(10)).unwrap();
+        let bins = bin(&parsed, Some(10), VarClass::Snv).unwrap();
 
         assert_eq!(bins.bins.len(), 1);
         assert_eq!(bins.bins[0].variants.len(), 3);
@@ -281,7 +292,7 @@ mod tests {
             variant("chr1", 120, VarType::Snv),
         ]);
 
-        let bins = bin(&parsed, Some(10)).unwrap();
+        let bins = bin(&parsed, Some(10), VarClass::Snv).unwrap();
 
         assert_eq!(bins.bins.len(), 2);
         assert_eq!(bins.bins[0].variants.len(), 1);
@@ -295,7 +306,7 @@ mod tests {
             variant("chr2", 101, VarType::Snv),
         ]);
 
-        let bins = bin(&parsed, Some(1000)).unwrap();
+        let bins = bin(&parsed, Some(1000), VarClass::Snv).unwrap();
 
         assert_eq!(bins.bins.len(), 2);
 
@@ -310,7 +321,7 @@ mod tests {
             variant("chr1", 110, VarType::Snv),
         ]);
 
-        let bins = bin(&parsed, Some(10)).unwrap();
+        let bins = bin(&parsed, Some(10), VarClass::Snv).unwrap();
 
         assert_eq!(bins.bins.len(), 1);
     }
@@ -323,7 +334,7 @@ mod tests {
         ]);
 
         // If no gap passed, default gap should be set to 100_000
-        let bins = bin(&parsed, None).unwrap();
+        let bins = bin(&parsed, None, VarClass::Snv).unwrap();
 
         assert_eq!(bins.bins.len(), 2);
     }
