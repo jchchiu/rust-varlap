@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::variant::VarClass;
 
@@ -78,6 +78,18 @@ pub struct LociArgs {
     /// Variant class to analyze
     #[arg(short = 'c', long, value_enum)]
     pub varclass: VarClass,
+
+    /// How to treat REF/ALT in the variant CSV (defaults to Strict where only variants with both REF/ALT are processed)
+    #[arg(long, value_enum, default_value_t = AlleleMode::Strict)]
+    pub alleles: AlleleMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum AlleleMode {
+    Strict,
+    Partial,
+    #[value(name = "none")]
+    NoAlleles,
 }
 
 #[derive(Debug, Args)]
