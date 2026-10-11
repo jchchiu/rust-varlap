@@ -12,51 +12,60 @@ use rayon::prelude::*;
 use tracing::{info, info_span};
 
 use crate::errors::AppError;
+use crate::cli::Mode;
 
 fn run() -> Result<()> {
-    let args = cli::parse();
+    let cli = cli::parse();
 
-    info!("-------------------------------------------------------------------------------");
-    let parsed_variants = variant_parser::parse(&args.variants, &args.varclass)?;
+    match cli.mode {
+        Mode::Loci { common, args } => {
+            info!("-------------------------------------------------------------------------------");
+            let parsed_variants = variant_parser::parse(&args.variants, &args.varclass)?;
 
-    let output_paths = output::make_output_csv_paths(
-        &args.output,
-        &args.reads,
-        &args.label,
-    )?;
+            let output_paths = output::make_output_csv_paths(
+                &common.output,
+                &common.reads,
+                &common.label,
+            )?;
 
-    // Initialize the thread pool for analyzing multiple BAM files in parallel
-    rayon::ThreadPoolBuilder::new().num_threads(args.threads).build_global()?;
+            // Initialize the thread pool for analyzing multiple BAM files in parallel
+            rayon::ThreadPoolBuilder::new().num_threads(common.threads).build_global()?;
 
-    info!("-------------------------------------------------------------------------------");
-    args.reads
-        .par_iter()
-        .enumerate()
-        .try_for_each(|(i, reads)| -> Result<()> {
-            let span = info_span!("sample", index = i, path = %reads.display());
-            span.in_scope(|| -> Result<()> {
+            info!("-------------------------------------------------------------------------------");
+            common.reads
+                .par_iter()
+                .enumerate()
+                .try_for_each(|(i, reads)| -> Result<()> {
+                    let span = info_span!("sample", index = i, path = %reads.display());
+                    span.in_scope(|| -> Result<()> {
 
-                let label = args.label.get(i).and_then(|l| l.as_deref());
+                        let label = common.label.get(i).and_then(|l| l.as_deref());
 
-                let mut binned_variants = binning::bin(&parsed_variants, args.gap)?;
+                        let mut binned_variants = binning::bin(&parsed_variants, common.gap)?;
 
-                read_parser::parse(
-                    &mut binned_variants,
-                    reads,
-                    &output_paths[i],
-                    args.sample.as_deref(),
-                    label,
-                    &args.varclass,
-                    args.fasta.as_deref(),
-                )?;
+                        read_parser::parse(
+                            &mut binned_variants,
+                            reads,
+                            &output_paths[i],
+                            common.sample.as_deref(),
+                            label,
+                            &args.varclass,
+                            common.fasta.as_deref(),
+                        )?;
 
-                Ok(())
-            })
-        })?;
+                        Ok(())
+                    })
+                })?;
 
-    if args.merge {
-        info!("-------------------------------------------------------------------------------");
-        output::merge_output_csvs(&output_paths, &args.output)?;
+            if common.merge {
+                info!("-------------------------------------------------------------------------------");
+                output::merge_output_csvs(&output_paths, &common.output)?;
+            }
+        }
+        Mode::Region { common, args } => {
+            println!("reads: {:?}", common.reads);
+            println!("{}", args.regions.display());
+        }
     }
 
     Ok(())

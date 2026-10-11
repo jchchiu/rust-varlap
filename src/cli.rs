@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 
 use crate::variant::VarClass;
 
@@ -9,17 +9,36 @@ use crate::variant::VarClass;
 #[command(version = "0.1.0-alpha.5")]
 #[command(about = "Quality control tool for genetic variants")]
 pub struct Cli {
-    /// Path to variants file [supported: vcf, csv, tsv; optionally gzipped (.gz)]
-    #[arg(short, long)]
-    pub variants: PathBuf,
+    #[command(subcommand)]
+    pub mode: Mode,
+}
 
+#[derive(Debug, Subcommand)]
+pub enum Mode {
+    /// Run the application in Loci mode
+    Loci {
+        #[command(flatten)]
+        common: CommonArgs,
+
+        #[command(flatten)]
+        args: LociArgs,
+    },
+
+    /// Run the application in Region mode
+    Region {
+        #[command(flatten)]
+        common: CommonArgs,
+
+        #[command(flatten)]
+        args: RegionArgs,
+    },
+}
+
+#[derive(Debug, Args)]
+pub struct CommonArgs {
     /// Path to reads file [supported: bam, cram]
     #[arg(short, long, num_args = 1..)]
     pub reads: Vec<PathBuf>,
-
-    /// Variant class to analyze
-    #[arg(short = 'c', long, value_enum)]
-    pub varclass: VarClass,
 
     /// Path to csv output directory and filename of output
     #[arg(short, long)]
@@ -48,6 +67,25 @@ pub struct Cli {
     /// Number of threads for multithreading reads file
     #[arg(short, long, default_value_t = 1)]
     pub threads: usize,
+}
+
+#[derive(Debug, Args)]
+pub struct LociArgs {
+    /// Path to variants file [supported: vcf, csv, tsv; optionally gzipped (.gz)]
+    #[arg(short, long)]
+    pub variants: PathBuf,
+
+    /// Variant class to analyze
+    #[arg(short = 'c', long, value_enum)]
+    pub varclass: VarClass,
+}
+
+#[derive(Debug, Args)]
+pub struct RegionArgs {
+    /// Path to bed regions file
+    #[arg(short = 'R', long)]
+    pub regions: PathBuf,
+
 }
 
 pub fn parse() -> Cli {
