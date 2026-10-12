@@ -1,14 +1,13 @@
-use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use csv::{ReaderBuilder, StringRecord};
-use flate2::read::MultiGzDecoder;
 use tracing::{debug, info, warn};
 
 use crate::cli::AlleleMode;
 use crate::errors::AppError;
+use crate::reader;
 use crate::variant::{ParsedVariants, VarClass, VarType, VariantInfo};
 
 pub fn parse(variants_path: &Path, varclass: VarClass, alleles: AlleleMode) -> Result<ParsedVariants> {
@@ -94,31 +93,6 @@ impl SkippedVariants {
     }
 }
 
-enum MaybeGzipReader {
-    Plain(File),
-    Gzip(MultiGzDecoder<File>),
-}
-
-impl Read for MaybeGzipReader {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        match self {
-            MaybeGzipReader::Plain(file) => file.read(buf),
-            MaybeGzipReader::Gzip(decoder) => decoder.read(buf),
-        }
-    }
-}
-
-fn open_variant_input(path: &Path) -> Result<MaybeGzipReader> {
-    let mut file = File::open(path)
-        .with_context(|| format!("Failed to open variants file '{}'", path.display()))?;
-
-    if is_gzip(&mut file)? {
-        Ok(MaybeGzipReader::Gzip(MultiGzDecoder::new(file)))
-    } else {
-        Ok(MaybeGzipReader::Plain(file))
-    }
-}
-
 #[derive(Debug, Clone)]
 struct VariantRow {
     chrom: String,
@@ -138,7 +112,7 @@ fn parse_vcf(
     variants: &mut Vec<VariantInfo>,
     skipped: &mut SkippedVariants,
 ) -> Result<()> {
-    let input = open_variant_input(file_path)?;
+    let input = reader::open_variant_input(file_path)?;
     let reader = BufReader::new(input);
 
    // For VCF override CLI allele mode input; always require strict
@@ -237,7 +211,7 @@ fn parse_delimited(
     variants: &mut Vec<VariantInfo>,
     skipped: &mut SkippedVariants,
 ) -> Result<()> {
-    let input = open_variant_input(file_path)?;
+    let input = reader::open_variant_input(file_path)?;
 
     // csv reader implements its own buffered reader
     let mut csv_reader = ReaderBuilder::new()
@@ -429,29 +403,6 @@ fn get_var_type(refr: &str, alt: &str) -> VarType {
         );
         VarType::Unknown
     }
-}
-
-// USING GZIP HANDLER AS PER RUSTQC
-// https://github.com/seqeralabs/RustQC/blob/main/src/io.rs
-// REWRITE MYSELF LATER
-
-// https://cseweb.ucsd.edu/classes/sp22/cse223B-a/tribbler/flate2/read/struct.MultiGzDecoder.html
-// Need to use multigzdecoder
-
-/// Gzip magic bytes: the first two bytes of any gzip-compressed file.
-const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
-
-fn is_gzip(file: &mut File) -> Result<bool> {
-    let mut magic = [0; 2];
-    let bytes = file
-        .read(&mut magic)
-        .with_context(|| format!("Failed to read first two bytes from '{:?}'", file))?;
-
-    // Go back to the start of the file
-    file.seek(SeekFrom::Start(0))
-        .with_context(|| format!("Failed to reseek start of file '{:?}'", file))?;
-
-    Ok(bytes >= 2 && magic == GZIP_MAGIC)
 }
 
 // fn is_valid_vcf_header_line(line: &str) -> Result<(), AppError> {

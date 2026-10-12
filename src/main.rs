@@ -4,6 +4,7 @@ mod errors;
 mod features;
 mod output;
 mod read_parser;
+mod reader;
 mod variant;
 mod variant_parser;
 
