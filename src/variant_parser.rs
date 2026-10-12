@@ -647,4 +647,83 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn is_acceptable_single_allele_cases() {
+        let at_max = "A".repeat(MAX_SINGLE_ALLELE_LEN);
+        let over_max = "A".repeat(MAX_SINGLE_ALLELE_LEN + 1);
+
+        let cases = [
+            // Valid SNV bases
+            (VarClass::Snv, "A", true),
+            (VarClass::Snv, "C", true),
+            (VarClass::Snv, "G", true),
+            (VarClass::Snv, "T", true),
+            // SNV with non-DNA base
+            (VarClass::Snv, "N", false),
+            // SNV too long
+            (VarClass::Snv, "AT", false),
+            // SNV empty
+            (VarClass::Snv, "", false),
+            // SNV with symbolic/spanning-deletion character
+            (VarClass::Snv, "*", false),
+            // Valid single-base indel allele
+            (VarClass::Indel, "A", true),
+            // Indel allele exactly at the length limit
+            (VarClass::Indel, at_max.as_str(), true),
+            // Indel allele just over the length limit
+            (VarClass::Indel, over_max.as_str(), false),
+            // Indel with non-DNA base
+            (VarClass::Indel, "AN", false),
+            // Indel with symbolic allele
+            (VarClass::Indel, "<DEL>", false),
+        ];
+
+        for (varclass, allele, expected) in cases {
+            assert_eq!(
+                is_acceptable_single_allele(varclass, allele),
+                expected,
+                "varclass={varclass:?}, allele={allele:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn make_partial_variant_cases() {
+        let cases = [
+            // Ref only (Some, None)
+            (Some("A"), None, Some("A"), None),
+            (Some("AT"), None, Some("AT"), None),
+            // Ref only, lowercase is uppercased
+            (Some("a"), None, Some("A"), None),
+            (Some("atg"), None, Some("ATG"), None),
+            // Alt only (None, Some)
+            (None, Some("T"), None, Some("T")),
+            (None, Some("AT"), None, Some("AT")),
+            // Alt only, lowercase is uppercased
+            (None, Some("t"), None, Some("T")),
+            (None, Some("atg"), None, Some("ATG")),
+            // Neither (None, None)
+            (None, None, None, None),
+        ];
+
+        for (refr, alt, expected_refr, expected_alt) in cases {
+            let row = VariantRow {
+                chrom: "chr1".to_string(),
+                pos: 1,
+                refr: Some("IGNORED".to_string()),
+                alts: vec![Some("IGNORED".to_string())],
+                line_no: 0,
+            };
+
+            let info = make_partial_variant(&row, refr, alt);
+
+            let ctx = format!("REF={refr:?}, ALT={alt:?}");
+            assert_eq!(info.chrom, "chr1", "{ctx}");
+            assert_eq!(info.pos, 1, "{ctx}");
+            assert_eq!(info.refr.as_deref(), expected_refr, "{ctx}");
+            assert_eq!(info.alt.as_deref(), expected_alt, "{ctx}");
+            assert!(matches!(info.vartype, VarType::Unknown), "{ctx}");
+        }
+    }
 }
