@@ -4,6 +4,7 @@ mod errors;
 mod features;
 mod output;
 mod read_parser;
+mod reader;
 mod variant;
 mod variant_parser;
 
@@ -20,7 +21,7 @@ fn run() -> Result<()> {
     match cli.mode {
         Mode::Loci { common, args } => {
             info!("-------------------------------------------------------------------------------");
-            let parsed_variants = variant_parser::parse(&args.variants, &args.varclass)?;
+            let parsed_variants = variant_parser::parse(&args.variants, args.varclass, args.alleles)?;
 
             let output_paths = output::make_output_csv_paths(
                 &common.output,
@@ -41,7 +42,7 @@ fn run() -> Result<()> {
 
                         let label = common.label.get(i).and_then(|l| l.as_deref());
 
-                        let mut binned_variants = binning::bin(&parsed_variants, common.gap)?;
+                        let mut binned_variants = binning::bin(&parsed_variants, common.gap, args.varclass)?;
 
                         read_parser::parse(
                             &mut binned_variants,
@@ -49,7 +50,7 @@ fn run() -> Result<()> {
                             &output_paths[i],
                             common.sample.as_deref(),
                             label,
-                            &args.varclass,
+                            args.varclass,
                             common.fasta.as_deref(),
                         )?;
 

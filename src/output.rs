@@ -56,7 +56,7 @@ pub fn write_header(
     writer: &mut Writer<File>,
     reads_path: &Path,
     label: Option<&str>,
-    varclass: &VarClass,
+    varclass: VarClass,
 ) -> Result<()> {
     let label_prefix = match label {
         Some(label) => label,

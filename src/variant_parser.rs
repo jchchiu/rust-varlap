@@ -1,16 +1,16 @@
-use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use csv::{ReaderBuilder, StringRecord};
-use flate2::read::MultiGzDecoder;
 use tracing::{debug, info, warn};
 
+use crate::cli::AlleleMode;
 use crate::errors::AppError;
+use crate::reader;
 use crate::variant::{ParsedVariants, VarClass, VarType, VariantInfo};
 
-pub fn parse(variants_path: &Path, varclass: &VarClass) -> Result<ParsedVariants> {
+pub fn parse(variants_path: &Path, varclass: VarClass, alleles: AlleleMode) -> Result<ParsedVariants> {
     let file_type = detect_file_type(variants_path)?;
 
     info!(
@@ -29,6 +29,7 @@ pub fn parse(variants_path: &Path, varclass: &VarClass) -> Result<ParsedVariants
             variants_path,
             file_type,
             varclass,
+            alleles,            
             &mut variants,
             &mut skipped,
         )?,
@@ -96,44 +97,26 @@ impl SkippedVariants {
 struct VariantRow {
     chrom: String,
     pos: u64,
-    refr: String,
-    alts: Vec<String>,
+    refr: Option<String>,
+    alts: Vec<Option<String>>,
     line_no: usize,
 }
 
-enum MaybeGzipReader {
-    Plain(File),
-    Gzip(MultiGzDecoder<File>),
-}
-
-impl Read for MaybeGzipReader {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        match self {
-            MaybeGzipReader::Plain(file) => file.read(buf),
-            MaybeGzipReader::Gzip(decoder) => decoder.read(buf),
-        }
-    }
-}
-
-fn open_variant_input(path: &Path) -> Result<MaybeGzipReader> {
-    let mut file = File::open(path)
-        .with_context(|| format!("Failed to open variants file '{}'", path.display()))?;
-
-    if is_gzip(&mut file)? {
-        Ok(MaybeGzipReader::Gzip(MultiGzDecoder::new(file)))
-    } else {
-        Ok(MaybeGzipReader::Plain(file))
-    }
-}
+// ===================================================================
+// Parsing VCFs
+// ===================================================================
 
 fn parse_vcf(
     file_path: &Path,
-    varclass: &VarClass,
+    varclass: VarClass,
     variants: &mut Vec<VariantInfo>,
     skipped: &mut SkippedVariants,
 ) -> Result<()> {
-    let input = open_variant_input(file_path)?;
+    let input = reader::open_variant_input(file_path)?;
     let reader = BufReader::new(input);
+
+   // For VCF override CLI allele mode input; always require strict
+    let alleles = AlleleMode::Strict;
 
     for (line_no, line_result) in reader.lines().enumerate() {
         let line = line_result.with_context(|| format!("Failed reading line {}", line_no + 1))?;
@@ -154,6 +137,12 @@ fn parse_vcf(
             continue;
         }
 
+        let refr = vcf_field(fields[3]).map(str::to_string);
+        let alts: Vec<Option<String>> = match vcf_field(fields[4]) {
+            Some(v) => v.split(',').map(|s| vcf_field(s).map(str::to_string)).collect(),
+            None => vec![None],
+        };
+
         let row = VariantRow {
             chrom: fields[0].to_string(),
             pos: match fields[1].parse() {
@@ -164,16 +153,30 @@ fn parse_vcf(
                     continue;
                 }
             },
-            refr: fields[3].to_string(),
-            alts: fields[4].split(',').map(|s| s.to_string()).collect(),
+            refr,
+            alts,
             line_no: line_no + 1,
         };
 
-        process_variant_row(&row, varclass, variants, skipped)?;
+        process_variant_row(&row, varclass, alleles, variants, skipped)?;
     }
 
     Ok(())
 }
+
+fn vcf_field(raw: &str) -> Option<&str> {
+    let trimmed = raw.trim();
+    // "." in VCF is a missing value; change here if want to implement optional ref/alt for VCF
+    if trimmed.is_empty() || trimmed == "." {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+// ===================================================================
+// Parsing Delimited (CSV/TSV)
+// ===================================================================
 
 fn delimiter_for(file_type: FileType) -> u8 {
     match file_type {
@@ -196,15 +199,21 @@ fn get_header_index(headers: &StringRecord, fields: &[&str]) -> Result<usize, Ap
     })
 }
 
+fn delimited_field(record: &StringRecord, idx: usize) -> Option<&str> {
+    record.get(idx).map(str::trim).filter(|s| !s.is_empty())
+}
+
 fn parse_delimited(
     file_path: &Path,
     file_type: FileType,
-    varclass: &VarClass,
+    varclass: VarClass,
+    alleles: AlleleMode,
     variants: &mut Vec<VariantInfo>,
     skipped: &mut SkippedVariants,
 ) -> Result<()> {
-    let input = open_variant_input(file_path)?;
+    let input = reader::open_variant_input(file_path)?;
 
+    // csv reader implements its own buffered reader
     let mut csv_reader = ReaderBuilder::new()
         .delimiter(delimiter_for(file_type))
         .has_headers(true)
@@ -227,86 +236,129 @@ fn parse_delimited(
 
         let line_no = record_no + 2;
 
-        let row = VariantRow {
-            chrom: match record.get(chrom_idx) {
-                Some(v) if !v.trim().is_empty() => v.trim().to_string(),
-                _ => {
-                    warn!("Missing CHROM at line {}", line_no);
-                    skipped.skipped += 1;
-                    continue;
-                }
-            },
-            pos: match record.get(pos_idx).map(str::trim).unwrap_or("").parse() {
-                Ok(p) => p,
-                Err(err) => {
-                    warn!("Invalid POS at line {}: {:?} ({err})", line_no, record);
-                    skipped.skipped += 1;
-                    continue;
-                }
-            },
-            refr: match record.get(ref_idx) {
-                Some(v) if !v.trim().is_empty() => v.trim().to_string(),
-                _ => {
-                    warn!("Missing REF at line {}", line_no);
-                    skipped.skipped += 1;
-                    continue;
-                }
-            },
-            alts: match record.get(alt_idx) {
-                Some(v) if !v.trim().is_empty() => {
-                    v.split(',').map(|s| s.trim().to_string()).collect()
-                }
-                _ => {
-                    warn!("Missing ALT at line {}", line_no);
-                    skipped.skipped += 1;
-                    continue;
-                }
-            },
-            line_no,
+        let chrom = match record.get(chrom_idx) {
+            Some(v) if !v.trim().is_empty() => v.trim().to_string(),
+            _ => {
+                warn!("Missing CHROM at line {}", line_no);
+                skipped.skipped += 1;
+                continue;
+            }
         };
 
-        process_variant_row(&row, varclass, variants, skipped)?;
+        let pos = match record.get(pos_idx).map(str::trim).unwrap_or("").parse() {
+            Ok(p) => p,
+            Err(err) => {
+                warn!("Invalid POS at line {}: {:?} ({err})", line_no, record);
+                skipped.skipped += 1;
+                continue;
+            }
+        };
+
+        // None: ignores the allele columns entirely
+        // Partial: ref/alt can be empty
+        let (refr, alts) = match alleles {
+            AlleleMode::NoAlleles => (None, vec![None]),
+            _ => (
+                delimited_field(&record, ref_idx).map(str::to_string),
+                match delimited_field(&record, alt_idx) {
+                    Some(v) => v.split(',').map(|s| Some(s.trim().to_string())).collect(),
+                    None => vec![None],
+                },
+            ),
+        };
+
+        // Strict: requires alleles in both REF/ALT
+        if alleles == AlleleMode::Strict {
+            if refr.is_none() {
+                warn!("Missing REF at line {}", line_no);
+                skipped.skipped += 1;
+                continue;
+            }
+            // NOTE: may need to rewrite here if we don't want to skip all for a multiallelic
+            if alts.iter().any(Option::is_none) {
+                warn!("Missing ALT at line {}", line_no);
+                skipped.skipped += 1;
+                continue;
+            }
+        }
+
+        let row = VariantRow { chrom, pos, refr, alts, line_no };
+
+        process_variant_row(&row, varclass, alleles, variants, skipped)?;
     }
 
     Ok(())
 }
 
+// ===================================================================
+// Processing Variant Rows
+// ===================================================================
+
 fn process_variant_row(
     row: &VariantRow,
-    varclass: &VarClass,
+    varclass: VarClass,
+    alleles: AlleleMode,
     variants: &mut Vec<VariantInfo>,
     skipped: &mut SkippedVariants,
 ) -> Result<()> {
     for alt in &row.alts {
-        let (norm_pos, norm_refr, norm_alt) = normalize_variant(row.pos, &row.refr, alt);
+        let variant = match (row.refr.as_deref(), alt.as_deref()) {
+            (Some(r), Some(a)) => {
+                let (norm_pos, norm_refr, norm_alt) = normalize_variant(row.pos, r, a);
+                let vartype = get_var_type(&norm_refr, &norm_alt);
+                is_acceptable_variant(varclass, vartype, row, &norm_refr, &norm_alt)
+                    .then(|| VariantInfo {
+                        chrom: row.chrom.clone(),
+                        pos: norm_pos,
+                        refr: Some(norm_refr),
+                        alt: Some(norm_alt),
+                        vartype,
+                    })
+            }
+            (Some(r), None) if (alleles == AlleleMode::Partial) && is_acceptable_single_allele(varclass, r) => {
+                Some(make_partial_variant(row, Some(r), None))
+            }
+            (None, Some(a)) if (alleles == AlleleMode::Partial) && is_acceptable_single_allele(varclass, a) => {
+                Some(make_partial_variant(row, None, Some(a)))
+            }
+            (None, None) if alleles != AlleleMode::Strict => Some(make_partial_variant(row, None, None)),
+            (r, a) => {
+                debug!(
+                    "Skipped line {}: chrom={} pos={} ref={:?} alt={:?} not usable with --alleles {:?}",
+                    row.line_no + 1, row.chrom, row.pos, r, a, alleles,
+                );
+                None
+            }
+        };
 
-        let vartype = get_var_type(&norm_refr, &norm_alt);
-
-        if is_acceptable_variant(varclass, &vartype, row, &norm_refr, &norm_alt) {
-            let variant = match varclass {
-                VarClass::Snv => VariantInfo {
-                    chrom: row.chrom.clone(),
-                    pos: norm_pos,
-                    refr: Some(norm_refr.clone()),
-                    alt: Some(norm_alt.to_string()),
-                    vartype,
-                },
-                VarClass::Indel => VariantInfo {
-                    chrom: row.chrom.clone(),
-                    pos: norm_pos,
-                    refr: Some(norm_refr.clone()),
-                    alt: Some(norm_alt.to_string()),
-                    vartype,
-                },
-            };
-
-            variants.push(variant);
-        } else {
-            skipped.skipped += 1;
+        match variant {
+            Some(v) => variants.push(v),
+            None => skipped.skipped += 1,
         }
     }
 
     Ok(())
+}
+
+/// Longest unpaired allele accepted for now; figure out how to handle INDELS
+const MAX_SINGLE_ALLELE_LEN: usize = 1;
+
+fn is_acceptable_single_allele(varclass: VarClass, allele: &str) -> bool {
+    is_only_dna_bases(allele)
+        && match varclass {
+            VarClass::Snv => allele.len() == 1,
+            VarClass::Indel => allele.len() <= MAX_SINGLE_ALLELE_LEN,
+        }
+}
+
+fn make_partial_variant(row: &VariantRow, refr: Option<&str>, alt: Option<&str>) -> VariantInfo {
+    VariantInfo {
+        chrom: row.chrom.clone(),
+        pos: row.pos,
+        refr: refr.map(str::to_ascii_uppercase),
+        alt: alt.map(str::to_ascii_uppercase),
+        vartype: VarType::Unknown,
+    }
 }
 
 /// Left-align and minimize a REF/ALT pair
@@ -353,29 +405,6 @@ fn get_var_type(refr: &str, alt: &str) -> VarType {
     }
 }
 
-// USING GZIP HANDLER AS PER RUSTQC
-// https://github.com/seqeralabs/RustQC/blob/main/src/io.rs
-// REWRITE MYSELF LATER
-
-// https://cseweb.ucsd.edu/classes/sp22/cse223B-a/tribbler/flate2/read/struct.MultiGzDecoder.html
-// Need to use multigzdecoder
-
-/// Gzip magic bytes: the first two bytes of any gzip-compressed file.
-const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
-
-fn is_gzip(file: &mut File) -> Result<bool> {
-    let mut magic = [0; 2];
-    let bytes = file
-        .read(&mut magic)
-        .with_context(|| format!("Failed to read first two bytes from '{:?}'", file))?;
-
-    // Go back to the start of the file
-    file.seek(SeekFrom::Start(0))
-        .with_context(|| format!("Failed to reseek start of file '{:?}'", file))?;
-
-    Ok(bytes >= 2 && magic == GZIP_MAGIC)
-}
-
 // fn is_valid_vcf_header_line(line: &str) -> Result<(), AppError> {
 //     let expected = ["#CHROM", "POS", "ID", "REF", "ALT"];
 //     if line.split('\t').take(5).eq(expected){
@@ -388,8 +417,8 @@ fn is_gzip(file: &mut File) -> Result<bool> {
 // }
 
 fn is_acceptable_variant(
-    varclass: &VarClass,
-    vartype: &VarType,
+    varclass: VarClass,
+    vartype: VarType,
     row: &VariantRow,
     refr: &str,
     alt: &str,
@@ -447,7 +476,7 @@ fn is_only_dna_bases(sequence: &str) -> bool {
             .all(|b| matches!(b.to_ascii_uppercase(), b'A' | b'T' | b'G' | b'C'))
 }
 
-fn is_desired_type(varclass: &VarClass, vartype: &VarType) -> bool {
+fn is_desired_type(varclass: VarClass, vartype: VarType) -> bool {
     match varclass {
         VarClass::Snv => matches!(vartype, VarType::Snv),
         VarClass::Indel => matches!(vartype, VarType::Ins | VarType::Del),
@@ -542,7 +571,7 @@ mod tests {
 
         for (varclass, vartype, expected) in cases {
             assert_eq!(
-                is_desired_type(&varclass, &vartype),
+                is_desired_type(varclass, vartype),
                 expected,
                 "varclass={varclass:?}, vartype={vartype:?}"
             );
@@ -606,16 +635,95 @@ mod tests {
             let row = VariantRow {
                 chrom: "chr1".to_string(),
                 pos: 1,
-                refr: refr.to_string(),
-                alts: vec![alt.to_string()],
+                refr: Some(refr.to_string()),
+                alts: vec![Some(alt.to_string())],
                 line_no: 0,
             };
 
             assert_eq!(
-                is_acceptable_variant(&varclass, &vartype, &row, refr, alt),
+                is_acceptable_variant(varclass, vartype, &row, refr, alt),
                 expected,
                 "varclass={varclass:?}, vartype={vartype:?}, REF={refr:?}, ALT={alt:?}"
             );
+        }
+    }
+
+    #[test]
+    fn is_acceptable_single_allele_cases() {
+        let at_max = "A".repeat(MAX_SINGLE_ALLELE_LEN);
+        let over_max = "A".repeat(MAX_SINGLE_ALLELE_LEN + 1);
+
+        let cases = [
+            // Valid SNV bases
+            (VarClass::Snv, "A", true),
+            (VarClass::Snv, "C", true),
+            (VarClass::Snv, "G", true),
+            (VarClass::Snv, "T", true),
+            // SNV with non-DNA base
+            (VarClass::Snv, "N", false),
+            // SNV too long
+            (VarClass::Snv, "AT", false),
+            // SNV empty
+            (VarClass::Snv, "", false),
+            // SNV with symbolic/spanning-deletion character
+            (VarClass::Snv, "*", false),
+            // Valid single-base indel allele
+            (VarClass::Indel, "A", true),
+            // Indel allele exactly at the length limit
+            (VarClass::Indel, at_max.as_str(), true),
+            // Indel allele just over the length limit
+            (VarClass::Indel, over_max.as_str(), false),
+            // Indel with non-DNA base
+            (VarClass::Indel, "AN", false),
+            // Indel with symbolic allele
+            (VarClass::Indel, "<DEL>", false),
+        ];
+
+        for (varclass, allele, expected) in cases {
+            assert_eq!(
+                is_acceptable_single_allele(varclass, allele),
+                expected,
+                "varclass={varclass:?}, allele={allele:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn make_partial_variant_cases() {
+        let cases = [
+            // Ref only (Some, None)
+            (Some("A"), None, Some("A"), None),
+            (Some("AT"), None, Some("AT"), None),
+            // Ref only, lowercase is uppercased
+            (Some("a"), None, Some("A"), None),
+            (Some("atg"), None, Some("ATG"), None),
+            // Alt only (None, Some)
+            (None, Some("T"), None, Some("T")),
+            (None, Some("AT"), None, Some("AT")),
+            // Alt only, lowercase is uppercased
+            (None, Some("t"), None, Some("T")),
+            (None, Some("atg"), None, Some("ATG")),
+            // Neither (None, None)
+            (None, None, None, None),
+        ];
+
+        for (refr, alt, expected_refr, expected_alt) in cases {
+            let row = VariantRow {
+                chrom: "chr1".to_string(),
+                pos: 1,
+                refr: Some("IGNORED".to_string()),
+                alts: vec![Some("IGNORED".to_string())],
+                line_no: 0,
+            };
+
+            let info = make_partial_variant(&row, refr, alt);
+
+            let ctx = format!("REF={refr:?}, ALT={alt:?}");
+            assert_eq!(info.chrom, "chr1", "{ctx}");
+            assert_eq!(info.pos, 1, "{ctx}");
+            assert_eq!(info.refr.as_deref(), expected_refr, "{ctx}");
+            assert_eq!(info.alt.as_deref(), expected_alt, "{ctx}");
+            assert!(matches!(info.vartype, VarType::Unknown), "{ctx}");
         }
     }
 }
