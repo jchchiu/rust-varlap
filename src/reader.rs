@@ -20,6 +20,8 @@ impl Read for MaybeGzipReader {
     }
 }
 
+// Change this function to be more generic
+// Change error message to deal with different input types (VCF, BED, etc.)
 pub fn open_variant_input(path: &Path) -> Result<MaybeGzipReader> {
     let mut file = File::open(path)
         .with_context(|| format!("Failed to open variants file '{}'", path.display()))?;
