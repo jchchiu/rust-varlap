@@ -130,7 +130,7 @@ fn parse_bed(
             };
 
         let end = match fields[2].parse::<u64>() {
-                Ok(p) => p - 1,
+                Ok(p) => p,
                 Err(err) => {
                     warn!("Invalid end POS at line {}: {} ({err})", line_no + 1, line);
                     parsed.skipped += 1;
