@@ -5,6 +5,7 @@ mod features;
 mod output;
 mod read_parser;
 mod reader;
+mod region_parser;
 mod variant;
 mod variant_parser;
 
@@ -14,6 +15,8 @@ use tracing::{info, info_span};
 
 use crate::errors::AppError;
 use crate::cli::Mode;
+use crate::variant::VarClass;
+
 
 fn run() -> Result<()> {
     let cli = cli::parse();
@@ -64,6 +67,51 @@ fn run() -> Result<()> {
             }
         }
         Mode::Region { common, args } => {
+            info!("-------------------------------------------------------------------------------");
+            let parsed_variants = region_parser::parse(&args.regions)?;
+
+            let output_paths = output::make_output_csv_paths(
+                &common.output,
+                &common.reads,
+                &common.label,
+            )?;
+
+            // Initialize the thread pool for analyzing multiple BAM files in parallel
+            rayon::ThreadPoolBuilder::new().num_threads(common.threads).build_global()?;
+
+            // Set region to use Snv mode so we can get allele counts
+            let varclass = VarClass::Snv;
+
+            info!("-------------------------------------------------------------------------------");
+            common.reads
+                .par_iter()
+                .enumerate()
+                .try_for_each(|(i, reads)| -> Result<()> {
+                    let span = info_span!("sample", index = i, path = %reads.display());
+                    span.in_scope(|| -> Result<()> {
+
+                        let label = common.label.get(i).and_then(|l| l.as_deref());
+
+                        let mut binned_variants = binning::bin(&parsed_variants, common.gap, varclass)?;
+
+                        read_parser::parse(
+                            &mut binned_variants,
+                            reads,
+                            &output_paths[i],
+                            common.sample.as_deref(),
+                            label,
+                            varclass,
+                            common.fasta.as_deref(),
+                        )?;
+
+                        Ok(())
+                    })
+                })?;
+
+            if common.merge {
+                info!("-------------------------------------------------------------------------------");
+                output::merge_output_csvs(&output_paths, &common.output)?;
+            }
             println!("reads: {:?}", common.reads);
             println!("{}", args.regions.display());
         }

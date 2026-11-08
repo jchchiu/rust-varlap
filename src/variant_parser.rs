@@ -178,6 +178,8 @@ fn vcf_field(raw: &str) -> Option<&str> {
 // Parsing Delimited (CSV/TSV)
 // ===================================================================
 
+// Make a note in docs: csv/tsv variants are assumed to be in 1-based positioning like VCF
+
 fn delimiter_for(file_type: FileType) -> u8 {
     match file_type {
         FileType::Csv => b',',
