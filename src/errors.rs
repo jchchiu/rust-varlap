@@ -10,6 +10,13 @@ pub enum AppError {
         extension: String,
     },
 
+    #[error("unsupported regions file format")]
+    UnsupportedRegionsFormat {
+        filename: PathBuf,
+        extension: String,
+    },
+
+
     #[error("unsupported reads file format")]
     UnsupportedReadsFormat {
         filename: PathBuf,
@@ -33,6 +40,9 @@ pub enum AppError {
 
     #[error("missing variants file extension")]
     MissingVariantsExtension { filename: PathBuf },
+
+    #[error("missing regions file extension")]
+    MissingRegionsExtension { filename: PathBuf },
 
     #[error("missing reads file extension")]
     MissingReadsExtension { filename: PathBuf },
@@ -62,10 +72,12 @@ impl AppError {
     pub fn exit_code(&self) -> i32 {
         match self {
             AppError::UnsupportedVariantsFormat { .. } => 3,
+            AppError::UnsupportedRegionsFormat { .. } => 3,
             AppError::UnsupportedReadsFormat { .. } => 3,
             AppError::UnsortedVariants { .. } => 3,
             AppError::TruncatedReads { .. } => 3,
             AppError::MissingVariantsExtension { .. } => 3,
+            AppError::MissingRegionsExtension { .. } => 3,
             AppError::MissingReadsExtension { .. } => 3,
             AppError::InvalidGzipName { .. } => 3,
             AppError::MissingDelimitedHeader { .. } => 3,
@@ -89,6 +101,20 @@ pub fn print_error(program: &str, err: &AppError) {
             eprintln!("  .vcf.gz");
             eprintln!("  .csv");
             eprintln!("  .tsv");
+        }
+
+        AppError::UnsupportedRegionsFormat {
+            filename,
+            extension,
+        } => {
+            eprintln!("{program} ERROR: unsupported regions file format");
+            eprintln!("Input file: {}", filename.display());
+            eprintln!("Detected extension: {extension}");
+            eprintln!("Supported formats are:");
+            eprintln!("  .bed(.gz)");
+            eprintln!("  .list(.gz)");
+            eprintln!("  .interval(.gz)");
+            eprintln!("  .interval_list(.gz)");
         }
 
         AppError::UnsupportedReadsFormat {
@@ -137,6 +163,16 @@ pub fn print_error(program: &str, err: &AppError) {
             eprintln!("  .vcf.gz");
             eprintln!("  .csv");
             eprintln!("  .tsv");
+        }
+
+        AppError::MissingRegionsExtension { filename } => {
+            eprintln!("{program} ERROR: regions missing file extension");
+            eprintln!("Input file: {}", filename.display());
+            eprintln!("Expected one of:");
+            eprintln!("  .bed(.gz)");
+            eprintln!("  .list(.gz)");
+            eprintln!("  .interval(.gz)");
+            eprintln!("  .interval_list(.gz)");
         }
 
         AppError::MissingReadsExtension { filename } => {
