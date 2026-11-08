@@ -130,7 +130,7 @@ fn parse_bed(
             };
 
         let end = match fields[2].parse::<u64>() {
-                Ok(p) => p,
+                Ok(p) => p + 1,
                 Err(err) => {
                     warn!("Invalid end POS at line {}: {} ({err})", line_no + 1, line);
                     parsed.skipped += 1;
@@ -179,4 +179,97 @@ fn process_region_row(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use super::*;
+
+    fn parse_bed_line(line: &str) -> (Vec<u64>, RegionsParsed) {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{line}").unwrap();
+
+        let mut positions = Vec::new();
+        let mut parsed = RegionsParsed::default();
+        parse_bed(file.path(), &mut positions, &mut parsed).unwrap();
+
+        (positions.iter().map(|p| p.pos).collect(), parsed)
+    }
+
+    #[test]
+    fn parse_bed_coordinate_cases() {
+        let cases = [
+            // BED is 0-based half-open; positions are 1-based inclusive
+            ("chr1\t0\t10", (1..=10).collect::<Vec<u64>>()),
+            // Single base region
+            ("chr1\t4\t5", vec![5]),
+            // Two base region
+            ("chr1\t4\t6", vec![5, 6]),
+            // Extra BED columns are ignored
+            ("chr1\t4\t6\tname\t0\t+", vec![5, 6]),
+            // Empty region (end == start) is skipped
+            ("chr1\t5\t5", vec![]),
+            // End before start is skipped
+            ("chr1\t6\t5", vec![]),
+            // End of 0 is skipped (no underflow)
+            ("chr1\t0\t0", vec![]),
+        ];
+
+        for (line, expected) in cases {
+            let (positions, parsed) = parse_bed_line(line);
+
+            assert_eq!(positions, expected, "line={line:?}");
+            assert_eq!(
+                parsed.processed + parsed.skipped,
+                1,
+                "line={line:?}"
+            );
+            assert_eq!(
+                parsed.skipped,
+                usize::from(expected.is_empty()),
+                "line={line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_bed_invalid_row_cases() {
+        let cases = [
+            // Too few columns
+            "chr1\t0",
+            // Non-numeric start
+            "chr1\tx\t10",
+            // Non-numeric end
+            "chr1\t0\tx",
+            // Negative coordinates
+            "chr1\t-1\t10",
+        ];
+
+        for line in cases {
+            let (positions, parsed) = parse_bed_line(line);
+
+            assert!(positions.is_empty(), "line={line:?}");
+            assert_eq!(parsed.skipped, 1, "line={line:?}");
+            assert_eq!(parsed.processed, 0, "line={line:?}");
+        }
+    }
+
+    #[test]
+    fn parse_bed_region_positions_have_no_alleles() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "chrM\t99\t100").unwrap();
+
+        let mut positions = Vec::new();
+        let mut parsed = RegionsParsed::default();
+        parse_bed(file.path(), &mut positions, &mut parsed).unwrap();
+
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].chrom, "chrM");
+        assert_eq!(positions[0].pos, 100);
+        assert!(positions[0].refr.is_none());
+        assert!(positions[0].alt.is_none());
+        assert_eq!(positions[0].vartype, VarType::Unknown);
+    }
 }
