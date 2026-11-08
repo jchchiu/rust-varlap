@@ -1,5 +1,14 @@
 name: Build & Release
 
+# Produces every install option in docs/src/1_getting_started/installation.md:
+#   - Pre-built binaries: linux-x86_64, linux-aarch64, macos-aarch64, macos-x86_64
+#   - Docker image on ghcr.io (linux/amd64 + linux/arm64)
+#   - Apptainer / Singularity .sif (attached to the release)
+#   - crates.io package
+# Bioconda is not published from here: the recipe lives in bioconda-recipes,
+# and its autobump bot picks up new GitHub releases.
+# Build from source / `cargo install --git --tag` need only the pushed tag.
+
 on:
   push:
     tags:
@@ -14,27 +23,69 @@ on:
 env:
   TOOL_NAME: rust-varlap
   TAG: ${{ github.event.inputs.tag_override || github.ref_name }}
+  PRERELEASE: ${{ contains(github.event.inputs.tag_override || github.ref_name, '-alpha') || contains(github.event.inputs.tag_override || github.ref_name, '-beta') || contains(github.event.inputs.tag_override || github.ref_name, '-rc') }}
 
 jobs:
   # ====================================================================== #
-  # JOB 1: Compile the Rust binary on a bare Ubuntu runner
+  # JOB 0: Make sure the tag matches the version in Cargo.toml and cli.rs,
+  #         so we never publish a crate/image with a mismatched version.
+  # ====================================================================== #
+  check-version:
+    name: Check tag matches crate version
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Compare versions
+        run: |
+          CARGO_VER=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n1)
+          CLI_VER=$(sed -n 's/.*#\[command(version *= *"\(.*\)")\].*/\1/p' src/cli.rs | head -n1)
+          echo "tag=${TAG} Cargo.toml=${CARGO_VER} cli.rs=${CLI_VER}"
+          if [[ "${CARGO_VER}" != "${CLI_VER}" ]]; then
+            echo "::error::Cargo.toml (${CARGO_VER}) and src/cli.rs (${CLI_VER}) versions differ"
+            exit 1
+          fi
+          # Manual test runs use a fake tag, so only enforce the tag check on real pushes
+          if [[ "${{ github.event_name }}" == "push" && "${TAG}" != "v${CARGO_VER}" ]]; then
+            echo "::error::Tag ${TAG} does not match crate version v${CARGO_VER}"
+            exit 1
+          fi
+
+  # ====================================================================== #
+  # JOB 1: Compile the Rust binary natively for each supported platform
   # ====================================================================== #
   build-binary:
-    name: Build Rust binary
-    runs-on: ubuntu-24.04
+    name: Build binary (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            runner: ubuntu-24.04
+          - target: linux-aarch64
+            runner: ubuntu-24.04-arm
+          - target: macos-aarch64
+            runner: macos-15
+          - target: macos-x86_64
+            runner: macos-15-intel
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
 
       # rust-htslib needs these system libraries at compile time
-      - name: Install system dependencies
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential \
             cmake \
             pkg-config \
+            clang \
+            libclang-dev \
             zlib1g-dev \
             libbz2-dev \
             liblzma-dev \
@@ -42,89 +93,120 @@ jobs:
             libssl-dev \
             libdeflate-dev
 
+      # zlib, bzip2 and curl come from macOS itself. OpenSSL and liblzma are
+      # linked statically so the binary doesn't depend on Homebrew at runtime.
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake pkg-config openssl@3
+          echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+          echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
+          echo "LZMA_API_STATIC=1" >> "$GITHUB_ENV"
+
       - name: Install Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
+          key: ${{ matrix.target }}
           cache-on-failure: true
 
       - name: Build release binary
         run: cargo build --release --locked
 
-      # Upload the binary so job 2 can pick it up without recompiling
+      - name: Check macOS binary links only system libraries
+        if: runner.os == 'macOS'
+        run: |
+          otool -L target/release/${TOOL_NAME}
+          if otool -L target/release/${TOOL_NAME} | tail -n +2 | grep -E '/(opt/homebrew|usr/local)/'; then
+            echo "::error::Binary links against Homebrew libraries and won't run on machines without them"
+            exit 1
+          fi
+
+      # Upload the binary so later jobs can pick it up without recompiling
       - name: Upload binary artifact
         uses: actions/upload-artifact@v5
         with:
-          name: ${{ env.TOOL_NAME }}-binary
+          name: ${{ env.TOOL_NAME }}-${{ matrix.target }}
           path: target/release/${{ env.TOOL_NAME }}
           retention-days: 1
 
   # ====================================================================== #
-  # JOB 2: Test the raw binary against real test data.
-  #         Both the binary and the repo (test_data + compare script)
-  #         are available in this job.
+  # JOB 2: Test each raw binary against real test data on its own platform.
   # ====================================================================== #
   test-binary:
-    name: Test binary
-    runs-on: ubuntu-24.04
+    name: Test binary (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
     needs: build-binary
- 
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            runner: ubuntu-24.04
+          - target: linux-aarch64
+            runner: ubuntu-24.04-arm
+          - target: macos-aarch64
+            runner: macos-15
+          - target: macos-x86_64
+            runner: macos-15-intel
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
- 
+
       # Runtime libraries needed to run the binary outside a container
-      - name: Install runtime dependencies
+      - name: Install runtime dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libcurl4t64 zlib1g libbz2-1.0 liblzma5 libdeflate0
- 
+
       - name: Download binary
         uses: actions/download-artifact@v6
         with:
-          name: ${{ env.TOOL_NAME }}-binary
+          name: ${{ env.TOOL_NAME }}-${{ matrix.target }}
           path: artifacts/
- 
+
       - name: Make binary executable
         run: chmod +x artifacts/${{ env.TOOL_NAME }}
- 
+
       - name: Smoke test — --version
         run: artifacts/${{ env.TOOL_NAME }} --version
- 
+
       - name: Smoke test — --help
         run: artifacts/${{ env.TOOL_NAME }} --help
- 
+
       - name: Run tool on test data
         run: |
-          artifacts/${{ env.TOOL_NAME }} \
-            --variants  test_data/chrM_heavy_stress.vcf \
-            --reads test_data/chrM_heavy_stress.sorted.bam \
-            --varclass snv \
-            --output test_data/actual_output.csv \
- 
+          artifacts/${{ env.TOOL_NAME }} loci \
+            -v test_data/chrM_heavy_stress.vcf \
+            -r test_data/chrM_heavy_stress.sorted.bam \
+            -c snv \
+            -o test_data/actual_output.csv
+
       - name: Make compare script executable
         run: chmod +x tests/compare_outputs.sh
- 
+
       - name: Compare output to gold standard
         run: |
           tests/compare_outputs.sh \
             test_data/python.chrM_heavy_stress.snv.csv \
             test_data/actual_output.csv \
             test_data/binary-test-diff.txt
- 
+
       - name: Upload binary test diff
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: binary-test-diff
+          name: binary-test-diff-${{ matrix.target }}
           path: test_data/binary-test-diff.txt
           retention-days: 7
 
   # ====================================================================== #
-  # JOB 3: Package the pre-built binary into a .sif
+  # JOB 3: Package the pre-built linux-x86_64 binary into a .sif
   # ====================================================================== #
   build-sif:
     name: Build Singularity image
@@ -135,7 +217,7 @@ jobs:
       - name: Download pre-built binary
         uses: actions/download-artifact@v6
         with:
-          name: ${{ env.TOOL_NAME }}-binary
+          name: ${{ env.TOOL_NAME }}-linux-x86_64
           path: artifact/
 
       - name: Make binary executable
@@ -212,11 +294,11 @@ jobs:
     name: Test Singularity image
     runs-on: ubuntu-24.04
     needs: build-sif
- 
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
- 
+
       - name: Install Apptainer
         run: |
           sudo apt-get update
@@ -225,43 +307,43 @@ jobs:
           APPTAINER_VER="1.4.1"
           wget -q "https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VER}/apptainer_${APPTAINER_VER}_amd64.deb"
           sudo dpkg -i "apptainer_${APPTAINER_VER}_amd64.deb"
- 
+
       - name: Download SIF artifact
         uses: actions/download-artifact@v6
         with:
           name: ${{ env.TOOL_NAME }}-sif
           path: artifacts/
- 
+
       - name: Inspect image labels
         run: apptainer inspect artifacts/*.sif
- 
+
       - name: Smoke test — --version
         run: apptainer run artifacts/*.sif --version
- 
+
       - name: Smoke test — --help
         run: apptainer run artifacts/*.sif --help
- 
+
       - name: Run tool on test data inside container
         run: |
           apptainer exec \
             -B "${{ github.workspace }}/test_data:/test_data" \
             artifacts/*.sif \
-            ${{ env.TOOL_NAME }} \
-              --variants  test_data/chrM_heavy_stress.vcf \
-              --reads test_data/chrM_heavy_stress.sorted.bam \
-              --varclass snv \
-              --output test_data/actual_output.csv \
- 
+            ${{ env.TOOL_NAME }} loci \
+              -v /test_data/chrM_heavy_stress.vcf \
+              -r /test_data/chrM_heavy_stress.sorted.bam \
+              -c snv \
+              -o /test_data/actual_output.csv
+
       - name: Make compare script executable
         run: chmod +x tests/compare_outputs.sh
- 
+
       - name: Compare output to gold standard
         run: |
           tests/compare_outputs.sh \
             test_data/python.chrM_heavy_stress.snv.csv \
             test_data/actual_output.csv \
             test_data/sif-test-diff.txt
- 
+
       - name: Upload sif test diff
         if: always()
         uses: actions/upload-artifact@v5
@@ -271,40 +353,209 @@ jobs:
           retention-days: 7
 
   # ====================================================================== #
-  # JOB 5: Publish the release — only runs if ALL tests pass,
-  #         and is skipped entirely on workflow_dispatch test runs.
+  # JOB 5: Build the Docker image (linux/amd64) locally and run the
+  #         regression test through it. Nothing is pushed here.
   # ====================================================================== #
+  test-docker:
+    name: Test Docker image
+    runs-on: ubuntu-24.04
+    needs: build-binary
 
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Download linux-x86_64 binary
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ env.TOOL_NAME }}-linux-x86_64
+          path: docker-context/amd64/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker-context
+          file: .github/docker/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.TOOL_NAME }}:test
+
+      - name: Smoke test — --version
+        run: docker run --rm ${TOOL_NAME}:test rust-varlap --version
+
+      - name: Run tool on test data inside container
+        run: |
+          docker run --rm -v "${{ github.workspace }}/test_data:/data" ${TOOL_NAME}:test \
+            rust-varlap loci \
+              -v /data/chrM_heavy_stress.vcf \
+              -r /data/chrM_heavy_stress.sorted.bam \
+              -c snv \
+              -o /data/actual_output.csv
+
+      - name: Compare output to gold standard
+        run: |
+          chmod +x tests/compare_outputs.sh
+          tests/compare_outputs.sh \
+            test_data/python.chrM_heavy_stress.snv.csv \
+            test_data/actual_output.csv \
+            test_data/docker-test-diff.txt
+
+      - name: Upload docker test diff
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: docker-test-diff
+          path: test_data/docker-test-diff.txt
+          retention-days: 7
+
+  # ====================================================================== #
+  # JOB 6: Publish the GitHub release (binaries + .sif) — only runs if ALL
+  #         tests pass, and is skipped on workflow_dispatch test runs.
+  # ====================================================================== #
   release:
     name: Publish GitHub release
     runs-on: ubuntu-24.04
-    needs: [test-binary, test-sif]
+    needs: [check-version, test-binary, test-sif, test-docker]
     # skip release on manual runs
     if: github.event_name == 'push'
     permissions:
       contents: write
- 
+
     steps:
-      - name: Download binary
+      - name: Download binaries
         uses: actions/download-artifact@v6
         with:
-          name: ${{ env.TOOL_NAME }}-binary
-          path: artifacts/
- 
+          pattern: ${{ env.TOOL_NAME }}-*-*
+          path: binaries/
+
       - name: Download SIF
         uses: actions/download-artifact@v6
         with:
           name: ${{ env.TOOL_NAME }}-sif
           path: artifacts/
- 
-      - name: Rename binary to include tag and arch
+
+      # binaries/<tool>-<target>/<tool> → artifacts/<tool>_<tag>_<target>
+      - name: Rename binaries to include tag and platform
         run: |
-          mv artifacts/${{ env.TOOL_NAME }} \
-             artifacts/${{ env.TOOL_NAME }}_${TAG}_linux-x86_64
- 
+          for dir in binaries/${TOOL_NAME}-*/; do
+            target=$(basename "$dir")
+            target=${target#${TOOL_NAME}-}
+            mv "${dir}${TOOL_NAME}" "artifacts/${TOOL_NAME}_${TAG}_${target}"
+          done
+          ls -l artifacts/
+
       - name: Create release and upload assets
         uses: softprops/action-gh-release@v3
         with:
-          prerelease: ${{ contains(env.TAG, '-alpha') || contains(env.TAG, '-beta') || contains(env.TAG, '-rc') }}
+          prerelease: ${{ env.PRERELEASE == 'true' }}
           generate_release_notes: true
           files: artifacts/*
+
+  # ====================================================================== #
+  # JOB 7: Push the multi-arch Docker image to ghcr.io.
+  #         Also what `apptainer pull docker://ghcr.io/...` uses.
+  # ====================================================================== #
+  publish-docker:
+    name: Publish Docker image
+    runs-on: ubuntu-24.04
+    needs: [check-version, test-binary, test-sif, test-docker]
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Download linux-x86_64 binary
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ env.TOOL_NAME }}-linux-x86_64
+          path: docker-context/amd64/
+
+      - name: Download linux-aarch64 binary
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ env.TOOL_NAME }}-linux-aarch64
+          path: docker-context/arm64/
+
+      # Needed to run the arm64 apt-get layer on an x86_64 runner
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Image names must be lowercase; `latest` only moves on stable releases
+      - name: Compute image tags
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          TAGS="${IMAGE}:${TAG}"
+          if [[ "${PRERELEASE}" != "true" ]]; then
+            TAGS="${TAGS},${IMAGE}:latest"
+          fi
+          echo "IMAGE_TAGS=${TAGS}" >> "$GITHUB_ENV"
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker-context
+          file: .github/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMAGE_TAGS }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ env.TAG }}
+            org.opencontainers.image.title=${{ env.TOOL_NAME }}
+            org.opencontainers.image.licenses=MIT
+
+  # ====================================================================== #
+  # JOB 8: Publish the crate to crates.io (for `cargo install rust-varlap`).
+  #         Requires the CARGO_REGISTRY_TOKEN repository secret.
+  # ====================================================================== #
+  publish-crate:
+    name: Publish to crates.io
+    runs-on: ubuntu-24.04
+    needs: [check-version, test-binary, test-sif, test-docker]
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # `cargo publish` builds the packaged crate to verify it, which needs htslib's deps
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            pkg-config \
+            clang \
+            libclang-dev \
+            zlib1g-dev \
+            libbz2-dev \
+            liblzma-dev \
+            libcurl4-openssl-dev \
+            libssl-dev \
+            libdeflate-dev
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked
