@@ -1,0 +1,48 @@
+/* Sidebar group headings */
+.chapter li.part-title {
+    color: #d9480f;          /* default colour */
+    font-weight: 700;
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 1.4em;
+}
+
+/* Adjust per theme so the colour stays readable */
+.light .chapter li.part-title,
+.rust .chapter li.part-title {
+    color: #c2410c;
+}
+
+.coal .chapter li.part-title,
+.navy .chapter li.part-title,
+.ayu .chapter li.part-title {
+    color: #fb923c;
+}
+
+/* Inline code (not code blocks) */
+.content :not(pre) > code {
+    color: #c2410c;
+    background: rgba(217, 72, 15, 0.08);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+}
+
+.coal .content :not(pre) > code,
+.navy .content :not(pre) > code,
+.ayu .content :not(pre) > code {
+    color: #fb923c;
+    background: rgba(251, 146, 60, 0.14);
+}
+
+/* Flag headings: slightly tighter, monospace stays readable */
+.content h4 > a > code {
+    font-size: 0.95em;
+}
+
+/* Highlight a heading when you arrive via its #anchor */
+.content h1:target, .content h2:target, .content h3:target,
+.content h4:target, .content h5:target, .content h6:target {
+    background: rgba(217, 72, 15, 0.1);
+    border-radius: 4px;
+}

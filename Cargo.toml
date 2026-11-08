@@ -6,6 +6,8 @@ description = "Quality control tool for genetic variants"
 readme = "README.md"
 repository = "https://github.com/jchchiu/rust-varlap"
 license = "MIT"
+# Keep the published crate under crates.io's 10 MB limit (test_data has a ~15 MB BAM)
+exclude = ["test_data/", "docs/", ".github/", ".readthedocs.yaml", "*.code-workspace"]
 
 [dependencies]
 anyhow = "1.0.102"

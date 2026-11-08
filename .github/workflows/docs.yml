@@ -1,0 +1,75 @@
+name: Deploy docs
+
+# Builds the mdBook in docs/ and publishes it to GitHub Pages at
+# https://jchchiu.github.io/rust-varlap/
+#
+# One-time setup: repo Settings → Pages → Build and deployment → Source: "GitHub Actions".
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+  # Build and deploy manually from any branch (e.g. to preview a docs branch)
+  workflow_dispatch:
+
+# Only one deployment at a time; don't cancel a deploy that's already running
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  # Match the versions used locally so the rendered book is identical
+  MDBOOK_VERSION: "0.5.4"
+  MDBOOK_TABS_VERSION: "1.0.5"
+
+jobs:
+  build:
+    name: Build book
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # Installs pre-built binaries (falls back to cargo-binstall), much faster than cargo install
+      - name: Install mdbook and mdbook-tabs
+        uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook@${{ env.MDBOOK_VERSION }},mdbook-tabs@${{ env.MDBOOK_TABS_VERSION }}
+
+      - name: Show versions
+        run: |
+          mdbook --version
+          mdbook-tabs --version
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build book
+        run: mdbook build docs
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs/book
+
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-24.04
+    needs: build
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

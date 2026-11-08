@@ -1,0 +1,15 @@
+[book]
+title = "rust-varlap"
+authors = ["jchchiu"]
+language = "en"
+
+[preprocessor.tabs]
+
+[output.html]
+no-section-label = true
+# GitHub Pages serves the book under /rust-varlap/; needed for the 404 page's links
+site-url = "/rust-varlap/"
+git-repository-url = "https://github.com/jchchiu/rust-varlap"
+edit-url-template = "https://github.com/jchchiu/rust-varlap/edit/main/docs/{path}"
+additional-css = ["theme/custom.css", "theme/tabs.css"]
+additional-js = ["theme/tabs.js"]
