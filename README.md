@@ -1,183 +1,177 @@
 # rust-varlap
 
-rust-varlap is a rewrite of [varlap](https://github.com/bjpop/varlap) from python into rust.
+[![Build & Release](https://github.com/jchchiu/rust-varlap/actions/workflows/release.yml/badge.svg)](https://github.com/jchchiu/rust-varlap/actions/workflows/release.yml)
+[![Docs](https://github.com/jchchiu/rust-varlap/actions/workflows/docs.yml/badge.svg)](https://jchchiu.github.io/rust-varlap/)
 
-* [Assumptions](#assumptions)
-* [Changes](#changes)
+rust-varlap is a quality control tool for genetic variants from high-throughput sequencing. It is a rewrite of [varlap](https://github.com/bjpop/varlap) from Python into Rust.
+
+For each variant (or each base of a region), it computes alignment-context metrics from one or more BAM/CRAM files: edit distance, base and mapping quality, alignment length, clipping, strand distribution and allele counts. Results are written as CSV in varlap's output format.
+
+📖 **Documentation:** <https://jchchiu.github.io/rust-varlap/>
+
 * [Installation](#installation)
 * [Usage](#usage)
+* [Assumptions](#assumptions)
+* [Changes from varlap](#changes-from-varlap)
 * [Notes](#notes)
-
-## Assumptions
-- The input variant files (vcf, csv, tsv) are sorted by variant chromosome and position in ascending order
-- Variants are not filtered or interpreted
-- The input read files (bam, cram) are sorted by read chromosome and position in ascending order
-- BAM, CRAM, FASTA need index files associated (.bai, .crai, .fai, respectively); for VCF, it is needed if gzipped (.tbi)
-
-## Changes
-- The algorithm now iterates over reads instead of variants
-    - Instead of calling pileup over variants we are now fetching reads for variants within a given range
-    - Variants are binned by chromosome, and further binned if variants are some `n` distance apart (gap)
-    - From preliminary testing, we have set the default gap size as 100 kb (100,000 bp) as it balances performance between files with sparsely and densely populated variants
-    - An optional hyperparameter has can be used to control this gap size between bins; generally speaking, sparsely populated variants throughout chromosomes may perform better if gap size is small (e.g. `5 x mean read length`); conversely, for densely populated variants all throughout the chromosome performance may be better if gap size is large (e.g. 1 Mb or even more)
-- Multiple bam/cram parsing is supported but by default they are not merged; there is an optional flag to merge outputs at the end if wanted
-- Changed header output field labels:
-    - e.g. from [label + ' ' + 'ref avg nm'] to [label + ' ' + 'ref_avg_nm']
-    - Easier to split header if necessary (split by ' ' will separate bam label and statistic field)
-- CRAM files are now supported
-- gzipped input variant files are now supported
-- Checks for truncated reads file if there are >= 10 consecutive read errors (doesn't check for EOF; can maybe check whether theres a EOF line at the start)
-- Region mode with bed files/Outliers mode is not currently supported
-- Implemented multithreading for parsing multiple reads files
+* [To-do](#to-do)
 
 ## Installation
 
-### Option 1: Pre-built binary (Linux x86\_64)
-
-Download the binary directly from the [Releases page](https://github.com/jchchiu/rust-varlap/releases).
+The quickest way to install is the pre-built binary:
 
 ```bash
 VERSION="v0.1.0-alpha.5"
 
 wget https://github.com/jchchiu/rust-varlap/releases/download/${VERSION}/rust-varlap_${VERSION}_linux-x86_64
 chmod +x rust-varlap_${VERSION}_linux-x86_64
-
-# Optional: move to somewhere on your PATH
 mv rust-varlap_${VERSION}_linux-x86_64 ~/.local/bin/rust-varlap
 
 rust-varlap --version
 ```
 
----
+While rust-varlap is in alpha, always pin a specific `VERSION`. GitHub's `releases/latest` URL doesn't resolve to pre-releases.
 
-### Option 2: Apptainer / Singularity `.sif`
+There are other ways to install it. The [installation guide](https://jchchiu.github.io/rust-varlap/1_getting_started/installation.html) has the full commands for each one:
 
-Download the binary directly from the [Releases page](https://github.com/jchchiu/rust-varlap/releases).
+| Method | Command / source |
+|---|---|
+| Pre-built binary | [Releases page](https://github.com/jchchiu/rust-varlap/releases): `linux-x86_64`, `linux-aarch64`, `macos-aarch64`, `macos-x86_64` |
+| Docker | `docker run --rm -v $(pwd):/data ghcr.io/jchchiu/rust-varlap:${VERSION} rust-varlap --help` |
+| Apptainer / Singularity | `apptainer pull docker://ghcr.io/jchchiu/rust-varlap:${VERSION}`, or download the `.sif` from the Releases page |
+| crates.io | `cargo install rust-varlap --version 0.1.0-alpha.5 --locked` |
+| Bioconda | Coming soon |
+| From source | `cargo install --git https://github.com/jchchiu/rust-varlap --tag ${VERSION} --locked` |
 
-```bash
-VERSION="v0.1.0-alpha.5"
-
-wget https://github.com/jchchiu/rust-varlap/releases/download/${VERSION}/rust-varlap_${VERSION}.sif
-```
-
-**Run:**
-
-```bash
-# Directly via the runscript
-./rust-varlap_${VERSION}.sif --version
-
-# Or explicitly with apptainer
-apptainer run rust-varlap_${VERSION}.sif --version
-
-# Bind directories when data lives outside your home folder
-apptainer exec \
-  -B /scratch/$USER:/scratch/$USER \
-  rust-varlap_${VERSION}.sif \
-  rust-varlap --version
-```
-
----
-
-### Option 3: Build from source
-
-Requires Rust ≥ 1.70 and a C toolchain.
-
-**Install:**
-
-```bash
-cargo install \
-  --git https://github.com/jchchiu/rust-varlap \
-  --tag v0.1.0-alpha.5 \
-  --locked
-```
-
-Places it in `~/.cargo/bin/rust-varlap` (which is on your `PATH` after a standard rustup install).
-
-```bash
-rust-varlap --version
-```
+Building from source, including through crates.io, needs Rust, a C toolchain, cmake and the htslib system libraries (zlib, bzip2, xz/lzma, curl, OpenSSL). The [installation guide](https://jchchiu.github.io/rust-varlap/1_getting_started/installation.html#build-from-source) has the packages for each OS.
 
 ## Usage
 
+rust-varlap has two subcommands:
+
 ```
-rust-varlap --variants <VARIANTS> --reads <READS>... --varclass <VARCLASS> --output <OUTPUT> [OPTIONS]
+rust-varlap loci   --variants <VARIANTS> --varclass <snv|indel> --reads <READS>... --output <OUTPUT> [OPTIONS]
+rust-varlap region --regions <BED>                               --reads <READS>... --output <OUTPUT> [OPTIONS]
 ```
 
-### Required Arguments
+* **`loci`** computes metrics for each variant in a VCF/CSV/TSV file.
+* **`region`** computes metrics for every base in the regions of a BED file.
+
+### Options shared by both modes
 
 | Flag | Description |
 |------|-------------|
-| `-v, --variants <PATH>` | Path to variants file (`.vcf`, `.csv`, `.tsv`; optionally gzipped with `.gz`) |
-| `-r, --reads <PATH>...` | Path to one or more reads files (`.bam`, `.cram`) |
-| `-c, --varclass <CLASS>` | Variant class to analyze |
-| `-o, --output <PATH>` | Path to output CSV (directory + filename) |
-
-### Optional Arguments
-
-| Flag | Description |
-|------|-------------|
-| `-f, --fasta <PATH>` | Path to FASTA reference (**required** if any reads file is CRAM) |
+| `-r, --reads <PATH>...` | One or more reads files (`.bam`, `.cram`) |
+| `-o, --output <PATH>` | Output CSV (directory and filename) |
+| `-f, --fasta <PATH>` | FASTA reference (**required** if any reads file is CRAM) |
 | `--sample <NAME>` | Sample identifier |
-| `--label <LABEL>...` | Label(s) for reads file(s); defaults to filename if omitted |
-| `--gap <BP>` | Bin size gap in base pairs (default: `100,000`) |
-| `--merge` | Merge output CSVs when multiple BAMs are provided |
-| `-t, --threads <N THREADS>` | Number of threads used if multithreading is wanted for multiple BAM/CRAM (default: `1`) |
+| `--label <LABEL>...` | Label for each reads file (defaults to the filename) |
+| `--gap <BP>` | Gap in base pairs that splits variants into bins (default: `100,000`) |
+| `--merge` | Merge the per-reads-file CSVs into one |
+| `-t, --threads <N>` | Number of reads files to process in parallel (default: `1`) |
+
+### `loci` options
+
+| Flag | Description |
+|------|-------------|
+| `-v, --variants <PATH>` | Variants file (`.vcf`, `.csv`, `.tsv`, plain or gzipped) |
+| `-c, --varclass <CLASS>` | Variant class to analyse: `snv` or `indel` |
+| `--alleles <MODE>` | How to treat missing REF/ALT in CSV/TSV input: `strict` (default), `partial` or `none`. VCFs always use `strict`. |
+
+### `region` options
+
+| Flag | Description |
+|------|-------------|
+| `-R, --regions <PATH>` | BED file of regions |
 
 ### Examples
 
-Basic usage with a VCF and a single BAM:
+SNVs from a VCF against a single BAM:
 
-```
-rust-varlap \
-  --variants sample.vcf \
-  --reads sample.bam \
-  --varclass snv \
-  --output results/output.csv
+```bash
+rust-varlap loci \
+  -v sample.vcf \
+  -r sample.bam \
+  -c snv \
+  -o results/output.csv
 ```
 
-Multiple BAMs with custom labels:
+Indels from a TSV against tumour and normal BAMs, keeping variants with a missing REF/ALT:
 
-```
-rust-varlap \
-  --variants cohort.tsv \
-  --reads tumor.bam normal.bam \
+```bash
+rust-varlap loci \
+  -v cohort.tsv \
+  -r tumor.bam normal.bam \
   --label tumor normal \
-  --varclass indel \
-  --output results/cohort.csv
+  -c indel \
+  --alleles partial \
+  -o results/cohort.csv
 ```
 
-Multiple CRAMs with custom labels, merged output (requires a FASTA reference):
+CRAMs (which need a FASTA reference), merged output and two threads:
 
-```
-rust-varlap \
+```bash
+rust-varlap loci \
   --sample patient1 \
-  --variants variants.vcf.gz \
-  --reads tumor.cram normal.cram  \
+  -v variants.vcf.gz \
+  -r tumor.cram normal.cram \
   --label tumor normal \
-  --fasta reference.fasta \
-  --varclass snv \
-  --output results/output.csv \
-  --merge
-  --threads 2
+  -f reference.fasta \
+  -c snv \
+  -o results/output.csv \
+  --merge \
+  -t 2
 ```
 
----
+Every base in a set of BED regions:
+
+```bash
+rust-varlap region \
+  -R regions.bed \
+  -r sample.bam \
+  -o results/regions.csv
+```
+
+The [CLI reference](https://jchchiu.github.io/rust-varlap/2_usage/cli.html) describes every option.
+
+## Assumptions
+
+- **Sorted variants and regions:** the input variant files (VCF, CSV, TSV) and BED files are sorted by chromosome and then position, in ascending order.
+- **No filtering:** variants are not filtered or interpreted.
+- **Sorted reads:** the input reads files (BAM, CRAM) are coordinate-sorted.
+- **Index files:** BAM, CRAM and FASTA files need their index files (`.bai`, `.crai` and `.fai`). A VCF needs one (`.tbi`) only if it is gzipped.
+
+## Changes from varlap
+
+- **Reads instead of variants:** the algorithm iterates over reads, not variants. Instead of calling pileup for each variant, it fetches the reads for groups of nearby variants. As a result, each read is fetched at most once per bin.
+- **Binning:** variants are grouped into bins by chromosome. A new bin starts wherever consecutive variants are more than `--gap` apart.
+  - The default gap of 100 kb balances performance between files with sparse variants and files with dense ones.
+  - Sparse variants may run faster with a small gap, for example 5 × the mean read length.
+  - Dense variants may run faster with a large gap, for example 1 Mb or more.
+- **Subcommands:** the CLI has two subcommands, `loci` and `region`. Region mode takes a BED file.
+- **Multiple reads files:** these are supported and can be processed in parallel with `--threads`. Their outputs are kept separate unless `--merge` is given.
+- **Header labels:** the output header labels have changed, for example from `label + ' ' + 'ref avg nm'` to `label + ' ' + 'ref_avg_nm'`. This makes the header easier to split, because splitting on `' '` separates the reads label from the statistic.
+- **New input formats:** rust-varlap accepts CRAM files and gzipped variant files.
+- **Optional REF/ALT:** REF/ALT can be optional in CSV/TSV input (`--alleles partial|none`).
+- **Truncated reads files:** if a reads file gives 10 or more consecutive read errors, rust-varlap treats it as truncated. It doesn't check for an EOF marker.
+- **Not yet supported:** varlap's outlier mode.
 
 ## Notes
-- For csv files, multiple alt alleles are not supported (e.g. `A,T`). Please separate them into multiple rows (i.e. row for `A` alt, row for `T` alt)
+
+- **Multiallelic CSV rows:** CSV files don't support multiple alt alleles in one row (e.g. `A,T`). Split them into separate rows, one for the `A` alt and one for the `T` alt.
 
 ## To-do
-- ~~Fix csv/tsv parsing (figure out best idiomatic way in rust to reduce resources/minimize friction when attempting multithreading/duplicate code)~~
-- ~~Add support for dealing with multiple chromosomes~~
-- ~~Fix output csv header so it matches varlap exactly (?)~~
-    - See changes for further info
+
+- ~~Fix csv/tsv parsing~~
+- ~~Add support for multiple chromosomes~~
+- ~~Fix the output csv header~~ (see [Changes from varlap](#changes-from-varlap))
 - ~~Improve error handling and add logging~~
-- Add unit tests/integration tests
-- Add region scanning mode (split into subcommands, 'allele' and 'region')
-- Implement multithreading for region mode
-- Deal with paired reads (implement something similar to mosdepth?)
-- Add option to sort variants if unsorted
-- Make ref/alt input optional (Still output stats that do not need this info)
-- Add function to deal with CRAM files that have standardized fasta reference files that can be accessed by bamreader
-- Implement automatic outlier detection like original varlap?
-    - If outlier detected can also output a command for IGV viewer that automatically opens the variant position of interest?
+- ~~Add region scanning mode (subcommands `loci` and `region`)~~
+- ~~Make ref/alt input optional~~
+- Add unit and integration tests
+- Reduce region mode memory use, and implement multithreading for region mode
+- Deal with paired reads (something similar to mosdepth?)
+- Add an option to sort unsorted variants
+- Support CRAM files whose standard FASTA reference can be fetched by the BAM reader
+- Implement automatic outlier detection, like the original varlap
+  - If an outlier is detected, also output an IGV command that opens the variant position
