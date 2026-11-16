@@ -21,7 +21,7 @@ For each variant (or each base of a region), it computes alignment-context metri
 The quickest way to install is the pre-built binary:
 
 ```bash
-VERSION="v0.1.0-alpha.5"
+VERSION="v0.1.0-beta.1"
 
 wget https://github.com/jchchiu/rust-varlap/releases/download/${VERSION}/rust-varlap_${VERSION}_linux-x86_64
 chmod +x rust-varlap_${VERSION}_linux-x86_64

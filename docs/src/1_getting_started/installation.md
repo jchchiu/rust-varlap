@@ -14,7 +14,7 @@ rust-varlap can be installed in several ways. Pick whichever suits your environm
 The examples below use a `VERSION` variable. Set it once and reuse it:
 
 ```bash
-VERSION="v0.1.0-alpha.5"
+VERSION="v0.1.0-beta.1"
 ```
 
 ---
